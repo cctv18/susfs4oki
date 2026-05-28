@@ -287,19 +287,20 @@ index b31b583f1..5703a5a00 100644
  		struct mnt_idmap *idmap;
  		const char *link;
  		u64 hash_len;
-@@ -2280,6 +2370,15 @@ static int link_path_walk(const char *name, struct nameidata *nd)
+@@ -2280,6 +2370,16 @@ static int link_path_walk(const char *name, struct nameidata *nd)
++#ifdef CONFIG_KSU_SUSFS_SUS_PATH
++		if (!err || err == -EACCES || err == -EPERM) {
++			dentry = nd->path.dentry;
++			if (dentry->d_inode && susfs_is_inode_sus_path(&nop_mnt_idmap, dentry->d_inode)) {
++				// - No need to dput() here
++				// - return -ENOENT here since it is walking the sub path of sus path
++				return -ENOENT;
++			}
++		}
++#endif
  		if (err)
  			return err;
  
-+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
-+		dentry = nd->path.dentry;
-+		if (dentry->d_inode && susfs_is_inode_sus_path(&nop_mnt_idmap, dentry->d_inode)) {
-+			// - No need to dput() here
-+			// - return -ENOENT here since it is walking the sub path of sus path
-+			return -ENOENT;
-+		}
-+#endif
-+
  		hash_len = hash_name(nd->path.dentry, name);
  
  		type = LAST_NORM;
