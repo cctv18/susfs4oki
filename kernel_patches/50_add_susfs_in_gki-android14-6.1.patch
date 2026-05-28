@@ -287,18 +287,20 @@ index 8e9c0b567..38b2be587 100644
  		struct user_namespace *mnt_userns;
  		const char *link;
  		u64 hash_len;
-@@ -2275,6 +2365,14 @@ static int link_path_walk(const char *name, struct nameidata *nd)
+@@ -2275,6 +2365,16 @@ static int link_path_walk(const char *name, struct nameidata *nd)
++#ifdef CONFIG_KSU_SUSFS_SUS_PATH
++		if (!err || err == -EACCES || err == -EPERM) {
++			dentry = nd->path.dentry;
++			if (dentry->d_inode && susfs_is_inode_sus_path(dentry->d_inode)) {
++				// - No need to dput() here
++				// - return -ENOENT here since it is walking the sub path of sus path
++				return -ENOENT;
++			}
++		}
++#endif
  		if (err)
  			return err;
  
-+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
-+		dentry = nd->path.dentry;
-+		if (dentry->d_inode && susfs_is_inode_sus_path(dentry->d_inode)) {
-+			// - No need to dput() here
-+			// - return -ENOENT here since it is walking the sub path of sus path
-+			return -ENOENT;
-+		}
-+#endif
  		hash_len = hash_name(nd->path.dentry, name);
  
  		type = LAST_NORM;
