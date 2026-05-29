@@ -93,7 +93,7 @@ index f5f972488..ef283d912 100644
  	 * We move the actual failure in case of RLIMIT_NPROC excess from
  	 * set*uid() to execve() because too many poorly written programs
 diff --git a/fs/namei.c b/fs/namei.c
-index bdc243fc4..eb51ac5e9 100644
+index bdc243fc4..f191aed26 100644
 --- a/fs/namei.c
 +++ b/fs/namei.c
 @@ -40,10 +40,18 @@
@@ -277,33 +277,23 @@ index bdc243fc4..eb51ac5e9 100644
  		dentry = lookup_slow(&nd->last, nd->path.dentry, nd->flags);
  		if (IS_ERR(dentry))
  			return ERR_CAST(dentry);
-@@ -2366,6 +2453,9 @@ static int link_path_walk(const char *name, struct nameidata *nd)
- 
- 	/* At this point we know we have a real path component. */
- 	for(;;) {
-+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
-+		struct dentry *dentry;
-+#endif
+@@ -2369,6 +2456,15 @@ static int link_path_walk(const char *name, struct nameidata *nd)
  		struct mnt_idmap *idmap;
  		const char *link;
  		unsigned long lastword;
-@@ -2375,6 +2465,15 @@ static int link_path_walk(const char *name, struct nameidata *nd)
- 		if (err)
- 			return err;
- 
 +#ifdef CONFIG_KSU_SUSFS_SUS_PATH
-+		dentry = nd->path.dentry;
++		struct dentry *dentry = nd->path.dentry;
++
 +		if (dentry->d_inode && susfs_is_inode_sus_path(&nop_mnt_idmap, dentry->d_inode)) {
 +			// - No need to dput() here
 +			// - return -ENOENT here since it is walking the sub path of sus path
 +			return -ENOENT;
 +		}
 +#endif
-+
- 		nd->last.name = name;
- 		name = hash_name(nd, name, &lastword);
  
-@@ -2560,6 +2659,9 @@ static inline const char *lookup_last(struct nameidata *nd)
+ 		idmap = mnt_idmap(nd->path.mnt);
+ 		err = may_lookup(idmap, nd);
+@@ -2560,6 +2656,9 @@ static inline const char *lookup_last(struct nameidata *nd)
  {
  	if (nd->last_type == LAST_NORM && nd->last.name[nd->last.len])
  		nd->flags |= LOOKUP_FOLLOW | LOOKUP_DIRECTORY;
@@ -313,7 +303,7 @@ index bdc243fc4..eb51ac5e9 100644
  
  	return walk_component(nd, WALK_TRAILING);
  }
-@@ -3514,15 +3616,39 @@ static struct dentry *lookup_open(struct nameidata *nd, struct file *file,
+@@ -3514,15 +3613,39 @@ static struct dentry *lookup_open(struct nameidata *nd, struct file *file,
  	int error, create_error = 0;
  	umode_t mode = op->mode;
  	DECLARE_WAIT_QUEUE_HEAD_ONSTACK(wq);
@@ -353,7 +343,7 @@ index bdc243fc4..eb51ac5e9 100644
  			if (IS_ERR(dentry))
  				return dentry;
  		}
-@@ -3660,6 +3786,9 @@ static const char *open_last_lookups(struct nameidata *nd,
+@@ -3660,6 +3783,9 @@ static const char *open_last_lookups(struct nameidata *nd,
  	bool got_write = false;
  	struct dentry *dentry;
  	const char *res;
@@ -363,7 +353,7 @@ index bdc243fc4..eb51ac5e9 100644
  
  	nd->flags |= op->intent;
  
-@@ -5251,6 +5380,11 @@ int readlink_copy(char __user *buffer, int buflen, const char *link)
+@@ -5251,6 +5377,11 @@ int readlink_copy(char __user *buffer, int buflen, const char *link)
   *
   * Does not call security hook.
   */
@@ -375,7 +365,7 @@ index bdc243fc4..eb51ac5e9 100644
  int vfs_readlink(struct dentry *dentry, char __user *buffer, int buflen)
  {
  	struct inode *inode = d_inode(dentry);
-@@ -5260,7 +5394,18 @@ int vfs_readlink(struct dentry *dentry, char __user *buffer, int buflen)
+@@ -5260,7 +5391,18 @@ int vfs_readlink(struct dentry *dentry, char __user *buffer, int buflen)
  
  	if (unlikely(!(inode->i_opflags & IOP_DEFAULT_READLINK))) {
  		if (unlikely(inode->i_op->readlink))
@@ -386,15 +376,15 @@ index bdc243fc4..eb51ac5e9 100644
 +				if (!res)
 +					return res;
 +			}
-+			return inode->i_op->readlink(dentry, buffer, buflen);
+ 			return inode->i_op->readlink(dentry, buffer, buflen);
 +		}
 +#else
- 			return inode->i_op->readlink(dentry, buffer, buflen);
++			return inode->i_op->readlink(dentry, buffer, buflen);
 +#endif
  
  		if (!d_is_symlink(dentry))
  			return -EINVAL;
-@@ -5276,6 +5421,15 @@ int vfs_readlink(struct dentry *dentry, char __user *buffer, int buflen)
+@@ -5276,6 +5418,15 @@ int vfs_readlink(struct dentry *dentry, char __user *buffer, int buflen)
  		if (IS_ERR(link))
  			return PTR_ERR(link);
  	}
