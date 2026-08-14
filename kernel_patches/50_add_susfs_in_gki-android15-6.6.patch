@@ -1209,7 +1209,7 @@ index e4380b37f..9a9bd52b2 100644
  static void
  show_map_vma(struct seq_file *m, struct vm_area_struct *vma)
  {
-@@ -275,9 +286,37 @@ show_map_vma(struct seq_file *m, struct vm_area_struct *vma)
+@@ -275,9 +286,42 @@ show_map_vma(struct seq_file *m, struct vm_area_struct *vma)
  
  	if (file) {
  		struct inode *inode = file_inode(vma->vm_file);
@@ -1222,7 +1222,12 @@ index e4380b37f..9a9bd52b2 100644
 +				pgoff = ((loff_t)vma->vm_pgoff) << PAGE_SHIFT;
 +				start = vma->vm_start;
 +				end = VMA_PAD_START(vma);
++#ifdef __fold_filemap_fixup_entry
 +				__fold_filemap_fixup_entry(&((struct proc_maps_private *)m->private)->iter, &end);
++else
++				if (flags & __VM_NO_COMPAT)
++					return;
++#endif
 +				show_vma_header_prefix(m, start, end, flags, pgoff, dev, ino);
 +				seq_pad(m, ' ');
 +				if (spoofed_redirected_name)
