@@ -1209,10 +1209,13 @@ index d6f37ed84..c760c26f6 100644
  static void
  show_map_vma(struct seq_file *m, struct vm_area_struct *vma)
  {
-@@ -287,9 +298,36 @@ show_map_vma(struct seq_file *m, struct vm_area_struct *vma)
+@@ -287,9 +298,39 @@ show_map_vma(struct seq_file *m, struct vm_area_struct *vma)
  
  	if (file) {
  		struct inode *inode = file_inode(vma->vm_file);
++#ifndef _LINUX_PAGE_SIZE_MIGRATION_H
++#define VMA_PAD_START(vma)	(vma->vm_end)
++#endif
 +#ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
 +		if (SUSFS_IS_INODE_OPEN_REDIRECT(inode)) {
 +			char *spoofed_redirected_name = NULL;
