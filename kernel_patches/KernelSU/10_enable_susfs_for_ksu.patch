@@ -1100,7 +1100,7 @@ index 5bb59bfe..1b34903f 100644
  {
      struct policydb *policydb;
 diff --git a/kernel/feature/sucompat.c b/kernel/feature/sucompat.c
-index 1ba7b58e..f50623e7 100644
+index 1ba7b58e..44618b20 100644
 --- a/kernel/feature/sucompat.c
 +++ b/kernel/feature/sucompat.c
 @@ -1,6 +1,3 @@
@@ -1180,7 +1180,7 @@ index 1ba7b58e..f50623e7 100644
  static char __user *ksud_user_path(void)
  {
      static const char ksud_path[] = KSUD_PATH;
-@@ -69,202 +89,209 @@ static char __user *ksud_user_path(void)
+@@ -69,202 +89,212 @@ static char __user *ksud_user_path(void)
      return userspace_stack_buffer(ksud_path, sizeof(ksud_path));
  }
  
@@ -1285,7 +1285,10 @@ index 1ba7b58e..f50623e7 100644
 -        goto do_orig_stat;
 +    if (likely(!strstr(filename->name, "/app_process") && !strstr(filename->name, "/adbd") && !strstr(filename->name, "/stub_zygote"))) {
 +        pr_info("susfs: mark no sucompat checks for pid: '%d', exec: '%s'\n", current->pid, filename->name);
-+        susfs_set_current_proc_umounted();
++        susfs_set_current_proc_no_su();
++        // - marking proc umounted here is useless because only zygote spawned processes will umount
++        //   the sus mounts, tho other susfs features still rely on proc_umounted check, but
++        //   it is fine to not spoof for init spawned processes.
 +        return 0;
      }
  
@@ -1566,7 +1569,7 @@ index 5e2cfe11..1d8da95a 100644
 +#endif
 \ No newline at end of file
 diff --git a/kernel/hook/setuid_hook.c b/kernel/hook/setuid_hook.c
-index d3f3ac49..9e2bc15d 100644
+index d3f3ac49..e8a068db 100644
 --- a/kernel/hook/setuid_hook.c
 +++ b/kernel/hook/setuid_hook.c
 @@ -11,6 +11,8 @@
@@ -1578,7 +1581,7 @@ index d3f3ac49..9e2bc15d 100644
  
  #include "policy/allowlist.h"
  #include "hook/setuid_hook.h"
-@@ -18,39 +20,66 @@
+@@ -18,39 +20,74 @@
  #include "manager/manager_identity.h"
  #include "infra/seccomp_cache.h"
  #include "supercall/supercall.h"
@@ -1612,8 +1615,11 @@ index d3f3ac49..9e2bc15d 100644
 -        ksu_set_task_tracepoint_flag(current);
 -        spin_unlock_irq(&current->sighand->siglock);
 +    // Check if spawned process is isolated service first, and force to do umount if so
-+    if (is_isolated_process(ruid))
++    if (is_isolated_process(ruid)) {
++        susfs_set_current_proc_no_su();
++        susfs_set_current_proc_umounted();
 +        goto do_umount;
++    }
  
 -        pr_info("install fd for manager: %d\n", new_uid);
 +    // - Since ksu maanger app uid is excluded in allow_list_arr, so ksu_uid_should_umount(manager_uid)
@@ -1637,17 +1643,27 @@ index d3f3ac49..9e2bc15d 100644
 -    } else {
 -        ksu_clear_task_tracepoint_flag_if_needed(current);
 +    // we should not umount for webview zygote
-+    if (unlikely(ruid == WEBVIEW_ZYGOTE_UID))
++    if (unlikely(ruid == WEBVIEW_ZYGOTE_UID)) {
++        susfs_set_current_proc_no_su();
 +        return 0;
++    }
 +
 +    // Check if spawned process is normal user app and needs to be umounted
-+    if (likely(is_appuid(ruid) && ksu_uid_should_umount(ruid)))
++    if (likely(is_appuid(ruid) && ksu_uid_should_umount(ruid))) {
++        susfs_set_current_proc_no_su();
++        susfs_set_current_proc_umounted();
 +        goto do_umount;
++    }
 +
 +    // - Disable seccomp restriction for root allowed apps since running with "su" will disable seccomp anyway
-+    if (ksu_is_allow_uid_for_current(ruid))
++    if (ksu_is_allow_uid_for_current(ruid)) {
 +        disable_seccomp();
-+
++        return 0;
+     }
+ 
+-    // Handle kernel umount
+-    ksu_handle_umount(old_uid, new_uid);
++    susfs_set_current_proc_no_su();
 +    return 0;
 +
 +do_umount:
@@ -1657,12 +1673,7 @@ index d3f3ac49..9e2bc15d 100644
 +
 +        // Handle extra susfs work
 +        ksu_handle_extra_susfs_work();
-     }
- 
--    // Handle kernel umount
--    ksu_handle_umount(old_uid, new_uid);
-+    // Mark current proc as umounted
-+    susfs_set_current_proc_umounted();
++    }
  
      return 0;
  }
@@ -2552,7 +2563,7 @@ index 635ec01c..c7b28b86 100644
  int ksu_sulog_emit_grant_root(int retval, __u32 uid, __u32 euid, gfp_t gfp);
  
 diff --git a/kernel/supercall/dispatch.c b/kernel/supercall/dispatch.c
-index 68c333f1..e340fc74 100644
+index 68c333f1..007a9389 100644
 --- a/kernel/supercall/dispatch.c
 +++ b/kernel/supercall/dispatch.c
 @@ -4,6 +4,8 @@
@@ -2642,7 +2653,7 @@ index 68c333f1..e340fc74 100644
 -            pr_err("manage_mark: get failed for pid %d: %d\n", cmd.pid, ret);
 -            return ret;
 +        case KSU_MARK_GET: {
-+            if (susfs_is_current_proc_umounted()) {
++            if (susfs_is_current_proc_no_su()) {
 +                ret = 0; // SYSCALL_TRACEPOINT is NOT flagged
 +            } else {
 +                ret = 1; // SYSCALL_TRACEPOINT is flagged
