@@ -528,7 +528,7 @@ index bdc243fc4..72d94d225 100644
  	do_delayed_call(&done);
  	return res;
 diff --git a/fs/namespace.c b/fs/namespace.c
-index 6739e1c04..bf894474f 100644
+index 6739e1c04..e77838a40 100644
 --- a/fs/namespace.c
 +++ b/fs/namespace.c
 @@ -33,11 +33,22 @@
@@ -716,7 +716,26 @@ index 6739e1c04..bf894474f 100644
  static struct mount *alloc_vfsmnt(const char *name)
  {
  	struct mount *mnt = kmem_cache_zalloc(mnt_cache, GFP_KERNEL);
-@@ -1212,7 +1363,21 @@ struct vfsmount *vfs_create_mount(struct fs_context *fc)
+@@ -810,6 +961,18 @@ struct mount *__lookup_mnt(struct vfsmount *mnt, struct dentry *dentry)
+ 	struct hlist_head *head = m_hash(mnt, dentry);
+ 	struct mount *p;
+ 
++#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
++	// - The hook here is needed as a temp solution to hide sus mnts for zygote_next
++	//   spawned process since it just inherits the init mount namespace, the solution
++	//   here is simply return the mount that is not sus.
++	if (susfs_is_current_proc_umounted_for_zygote_next()) {
++		hlist_for_each_entry_rcu(p, head, mnt_hash)
++			if (p->mnt_id < DEFAULT_KSU_MNT_ID && &p->mnt_parent->mnt == mnt && p->mnt_mountpoint == dentry)
++				return p;
++		return NULL;
++	}
++#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
++
+ 	hlist_for_each_entry_rcu(p, head, mnt_hash)
+ 		if (&p->mnt_parent->mnt == mnt && p->mnt_mountpoint == dentry)
+ 			return p;
+@@ -1212,7 +1375,21 @@ struct vfsmount *vfs_create_mount(struct fs_context *fc)
  	if (!fc->root)
  		return ERR_PTR(-EINVAL);
  
@@ -738,7 +757,7 @@ index 6739e1c04..bf894474f 100644
  	if (!mnt)
  		return ERR_PTR(-ENOMEM);
  
-@@ -1294,8 +1459,42 @@ static struct mount *clone_mnt(struct mount *old, struct dentry *root,
+@@ -1294,8 +1471,42 @@ static struct mount *clone_mnt(struct mount *old, struct dentry *root,
  	struct super_block *sb = old->mnt.mnt_sb;
  	struct mount *mnt;
  	int err;
@@ -781,7 +800,7 @@ index 6739e1c04..bf894474f 100644
  	if (!mnt)
  		return ERR_PTR(-ENOMEM);
  
-@@ -1313,6 +1512,11 @@ static struct mount *clone_mnt(struct mount *old, struct dentry *root,
+@@ -1313,6 +1524,11 @@ static struct mount *clone_mnt(struct mount *old, struct dentry *root,
  	mnt->mnt.mnt_flags = old->mnt.mnt_flags;
  	mnt->mnt.mnt_flags &= ~(MNT_WRITE_HOLD|MNT_MARKED|MNT_INTERNAL);
  
@@ -793,7 +812,7 @@ index 6739e1c04..bf894474f 100644
  	atomic_inc(&sb->s_active);
  	mnt->mnt.mnt_idmap = mnt_idmap_get(mnt_idmap(&old->mnt));
  
-@@ -1557,6 +1761,12 @@ static struct mount *mnt_find_id_at(struct mnt_namespace *ns, u64 mnt_id)
+@@ -1557,6 +1773,12 @@ static struct mount *mnt_find_id_at(struct mnt_namespace *ns, u64 mnt_id)
  			node = node->rb_right;
  		}
  	}
@@ -806,7 +825,7 @@ index 6739e1c04..bf894474f 100644
  	return ret;
  }
  
-@@ -3990,6 +4200,9 @@ struct mnt_namespace *copy_mnt_ns(unsigned long flags, struct mnt_namespace *ns,
+@@ -3990,6 +4212,9 @@ struct mnt_namespace *copy_mnt_ns(unsigned long flags, struct mnt_namespace *ns,
  	copy_flags = CL_COPY_UNBINDABLE | CL_EXPIRE;
  	if (user_ns != ns->user_ns)
  		copy_flags |= CL_SHARED_TO_SLAVE;
@@ -816,7 +835,7 @@ index 6739e1c04..bf894474f 100644
  	new = copy_tree(old, old->mnt.mnt_root, copy_flags);
  	if (IS_ERR(new)) {
  		namespace_unlock();
-@@ -5485,6 +5698,12 @@ static ssize_t do_listmount(struct klistmount *kls, bool reverse)
+@@ -5485,6 +5710,12 @@ static ssize_t do_listmount(struct klistmount *kls, bool reverse)
  			continue;
  		if (!is_path_reachable(r, r->mnt.mnt_root, &orig))
  			continue;
@@ -829,7 +848,7 @@ index 6739e1c04..bf894474f 100644
  		*mnt_ids = r->mnt_id_unique;
  		mnt_ids++;
  		nr_mnt_ids--;
-@@ -5911,3 +6130,46 @@ static int __init init_fs_namespace_sysctls(void)
+@@ -5911,3 +6142,46 @@ static int __init init_fs_namespace_sysctls(void)
  fs_initcall(init_fs_namespace_sysctls);
  
  #endif /* CONFIG_SYSCTL */
@@ -876,7 +895,6 @@ index 6739e1c04..bf894474f 100644
 +	return &mnt->mnt;
 +}
 +#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
-\ No newline at end of file
 diff --git a/fs/notify/fdinfo.c b/fs/notify/fdinfo.c
 index d2aa8985c..ad8b5f980 100644
 --- a/fs/notify/fdinfo.c
