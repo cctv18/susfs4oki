@@ -2017,7 +2017,7 @@ index 09384def..ba238519 100644
 +                             struct user_arg_ptr *envp, int *flags);
  #endif
 diff --git a/kernel/runtime/ksud_integration.c b/kernel/runtime/ksud_integration.c
-index 5bf84cb6..24e1b361 100644
+index 5bf84cb6..6f81803c 100644
 --- a/kernel/runtime/ksud_integration.c
 +++ b/kernel/runtime/ksud_integration.c
 @@ -11,7 +11,6 @@
@@ -2209,19 +2209,24 @@ index 5bf84cb6..24e1b361 100644
  {
      struct file *file = fget(fd);
      if (!file) {
-@@ -485,7 +489,10 @@ int ksu_handle_input_handle_event(unsigned int *type, unsigned int *code, int *v
+@@ -482,11 +486,13 @@ int ksu_handle_input_handle_event(unsigned int *type, unsigned int *code, int *v
+         int val = *value;
+         pr_info("KEY_VOLUMEDOWN val: %d\n", val);
+         if (val) {
++	    // - We cannot call static_branch_disable() here as we are within the
++	    //   spinlock section, which is not sleepable.
++            // - So if volumedown is enough, just do nothing until it gets disabled by on_post_fs_data().
++            if (is_volumedown_enough(volumedown_pressed_count))
++                return 0;
              // key pressed, count it
              volumedown_pressed_count += 1;
-             if (is_volumedown_enough(volumedown_pressed_count)) {
+-            if (is_volumedown_enough(volumedown_pressed_count)) {
 -                ksu_stop_input_hook_runtime();
-+                if (static_key_enabled(&ksu_is_input_hook_enabled)) {
-+                    static_branch_disable(&ksu_is_input_hook_enabled);
-+                    pr_info("ksu_input_hook is disabled\n");
-+                }
-             }
+-            }
          }
      }
-@@ -501,12 +508,11 @@ bool ksu_is_safe_mode()
+ 
+@@ -501,12 +507,11 @@ bool ksu_is_safe_mode()
          return true;
      }
  
@@ -2238,7 +2243,7 @@ index 5bf84cb6..24e1b361 100644
  
      pr_info("volumedown_pressed_count: %d\n", volumedown_pressed_count);
      if (is_volumedown_enough(volumedown_pressed_count)) {
-@@ -519,66 +525,13 @@ bool ksu_is_safe_mode()
+@@ -519,66 +524,13 @@ bool ksu_is_safe_mode()
      return false;
  }
  
@@ -2267,7 +2272,8 @@ index 5bf84cb6..24e1b361 100644
 -}
 -
 -void ksu_execve_hook_ksud(const struct pt_regs *regs)
--{
++void ksu_handle_vfs_fstat(int fd, loff_t *kstat_size_ptr)
+ {
 -    const char __user *filename_user = (const char __user *)PT_REGS_PARM1(regs);
 -    const char __user *const __user *argv_user = (const char __user *const __user *)PT_REGS_PARM2(regs);
 -
@@ -2295,8 +2301,7 @@ index 5bf84cb6..24e1b361 100644
 -
 -static long (*orig_sys_fstat)(const struct pt_regs *regs);
 -static long ksu_sys_fstat(const struct pt_regs *regs)
-+void ksu_handle_vfs_fstat(int fd, loff_t *kstat_size_ptr)
- {
+-{
 -    unsigned int fd = PT_REGS_PARM1(regs);
 -    void __user *statbuf = (void __user *)PT_REGS_PARM2(regs);
 +    loff_t orig_size = *kstat_size_ptr;
@@ -2309,7 +2314,7 @@ index 5bf84cb6..24e1b361 100644
      if (file) {
          if (is_init_rc(file)) {
              pr_info("stat init.rc");
-@@ -588,85 +541,20 @@ static long ksu_sys_fstat(const struct pt_regs *regs)
+@@ -588,85 +540,20 @@ static long ksu_sys_fstat(const struct pt_regs *regs)
          fput(file);
      }
  
