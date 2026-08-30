@@ -526,10 +526,10 @@ index 154a466d..ac113ea5 100644
  void ksu_adb_root_init(void);
  
 diff --git a/kernel/feature/kernel_umount.c b/kernel/feature/kernel_umount.c
-index d77494df..034db917 100644
+index 7e337abf..8b6e0b3c 100644
 --- a/kernel/feature/kernel_umount.c
 +++ b/kernel/feature/kernel_umount.c
-@@ -106,30 +106,6 @@ int ksu_handle_umount(uid_t old_uid, uid_t new_uid)
+@@ -83,30 +83,6 @@ int ksu_handle_umount(uid_t old_uid, uid_t new_uid)
          return 0;
      }
  
@@ -537,7 +537,7 @@ index d77494df..034db917 100644
 -    // 1. Normal app: zygote -> appuid
 -    // 2. Isolated process forked from zygote: zygote -> isolated_process
 -    // 3. App zygote forked from zygote: zygote -> appuid
--    // 4. Webview zygote forked from zygote: zygote -> webview_zygote (controlled by feature policy)
+-    // 4. Webview zygote forked from zygote: zygote -> webview_zygote
 -    // 5. Isolated process forked from app zygote: appuid -> isolated_process (already handled by 3)
 -    // 6. Isolated process forked from webview zygote (already handled by 4)
 -    if (!is_appuid(new_uid) && new_uid != WEBVIEW_ZYGOTE_UID && !is_isolated_process(new_uid)) {
@@ -1558,7 +1558,7 @@ index 5e2cfe11..a4a6a7de 100644
 +#endif
 \ No newline at end of file
 diff --git a/kernel/hook/setuid_hook.c b/kernel/hook/setuid_hook.c
-index d3f3ac49..4ca6e5f0 100644
+index d3f3ac49..1f1e91be 100644
 --- a/kernel/hook/setuid_hook.c
 +++ b/kernel/hook/setuid_hook.c
 @@ -11,6 +11,8 @@
@@ -1570,7 +1570,7 @@ index d3f3ac49..4ca6e5f0 100644
  
  #include "policy/allowlist.h"
  #include "hook/setuid_hook.h"
-@@ -18,41 +20,157 @@
+@@ -18,43 +20,138 @@
  #include "manager/manager_identity.h"
  #include "infra/seccomp_cache.h"
  #include "supercall/supercall.h"
@@ -1588,68 +1588,9 @@ index d3f3ac49..4ca6e5f0 100644
 -    // we rely on the fact that zygote always call setresuid(3) with same uids
 +    if (work_pending(&susfs_extra_works))
 +        return;
-+
-+    schedule_work(&susfs_extra_works);
-+}
-+
-+static int handle_zygote_setresuid(uid_t ruid) {
-+    // Check if spawned process is isolated service first, and force to do umount if so
-+    if (is_isolated_process(ruid)) {
-+        susfs_set_current_proc_no_su();
-+        susfs_set_current_proc_umounted();
-+        goto do_umount;
-+    }
-+
-+    // - Since ksu maanger app uid is excluded in allow_list_arr, so ksu_uid_should_umount(manager_uid)
-+    //   will always return true, that's why we need to explicitly check if new_uid belongs to
-+    //   ksu manager.
-+    // - Disable seccomp restriction for KSU manager since running with "su" will disable seccomp anyway
-+    if (likely(ksu_is_manager_appid_valid()) && unlikely(is_uid_manager(ruid))) {
-+        disable_seccomp();
-+        pr_info("install fd for manager: %d\n", ruid);
-+        ksu_install_fd();
-+        return 0;
-+    }
-+
-+    // Check if webview zygote should be umounted
-+    if (unlikely(ruid == WEBVIEW_ZYGOTE_UID)) {
-+        if (ksu_webview_zygote_umount_enabled) {
-+            susfs_set_current_proc_no_su();
-+            susfs_set_current_proc_umounted();
-+            goto do_umount;
-+        }
-+        susfs_set_current_proc_no_su();
-+        return 0;
-+    }
-+
-+    // Check if spawned process is normal user app and needs to be umounted
-+    if (likely(is_appuid(ruid) && ksu_uid_should_umount(ruid))) {
-+        susfs_set_current_proc_no_su();
-+        susfs_set_current_proc_umounted();
-+        goto do_umount;
-+    }
-+
-+    // Disable seccomp restriction for root allowed apps since running with "su" will disable seccomp anyway
-+    if (ksu_is_allow_uid_for_current(ruid)) {
-+        disable_seccomp();
-+        return 0;
-+    }
-+
-+    // Process not umounted but also root not allowed
-+    susfs_set_current_proc_no_su();
-+    return 0;
-+
-+do_umount:
-+    {
-+        // Handle kernel umount
-+        ksu_handle_umount(current_uid().val, ruid);
-+
-+        // Handle extra susfs work
-+        ksu_handle_extra_susfs_work();
-+    }
  
 -    pr_info("handle_setresuid from %d to %d\n", old_uid, new_uid);
-+    return 0;
++    schedule_work(&susfs_extra_works);
 +}
  
 -    if (unlikely(is_uid_manager(new_uid))) {
@@ -1657,13 +1598,12 @@ index d3f3ac49..4ca6e5f0 100644
 -        ksu_seccomp_allow_cache(current->seccomp.filter, __NR_reboot);
 -        ksu_set_task_tracepoint_flag(current);
 -        spin_unlock_irq(&current->sighand->siglock);
-+static int handle_zygote_next_setresuid(uid_t ruid) {
++static int handle_zygote_setresuid(uid_t ruid) {
 +    // Check if spawned process is isolated service first, and force to do umount if so
 +    if (is_isolated_process(ruid)) {
 +        susfs_set_current_proc_no_su();
 +        susfs_set_current_proc_umounted();
-+        susfs_set_current_proc_umounted_for_zygote_next();
-+        goto do_susfs_work;
++        goto do_umount;
 +    }
  
 -        pr_info("install fd for manager: %d\n", new_uid);
@@ -1683,40 +1623,80 @@ index d3f3ac49..4ca6e5f0 100644
 -            spin_lock_irq(&current->sighand->siglock);
 -            ksu_seccomp_allow_cache(current->seccomp.filter, __NR_reboot);
 -            spin_unlock_irq(&current->sighand->siglock);
-+    // Check if webview zygote should be umounted
-+    if (unlikely(ruid == WEBVIEW_ZYGOTE_UID)) {
-+        if (ksu_webview_zygote_umount_enabled) {
-+            susfs_set_current_proc_no_su();
-+            susfs_set_current_proc_umounted();
-+            susfs_set_current_proc_umounted_for_zygote_next();
-+            goto do_susfs_work;
-         }
+-        }
 -        ksu_set_task_tracepoint_flag(current);
 -    } else {
 -        ksu_clear_task_tracepoint_flag_if_needed(current);
++    // - Check if spawned process is normal user app and needs to be umounted
++    // - Now app_profile for webview_zygote is available in KernelSU manager
++    if (likely(is_appuid(ruid) && ksu_uid_should_umount(ruid))) {
 +        susfs_set_current_proc_no_su();
++        susfs_set_current_proc_umounted();
++        goto do_umount;
++    }
++
++    // Disable seccomp restriction for root allowed apps since running with "su" will disable seccomp anyway
++    if (ksu_is_allow_uid_for_current(ruid)) {
++        disable_seccomp();
++        return 0;
+     }
+ 
+-    // Handle kernel umount
+-    ksu_handle_umount(old_uid, new_uid);
++    // Process not umounted but also root not allowed
++    susfs_set_current_proc_no_su();
++    return 0;
++
++do_umount:
++    {
++        // Handle kernel umount
++        ksu_handle_umount(current_uid().val, ruid);
++
++        // Handle extra susfs work
++        ksu_handle_extra_susfs_work();
++    }
+ 
+     return 0;
+ }
+ 
++static int handle_zygote_next_setresuid(uid_t ruid) {
++    // Check if spawned process is isolated service first, and force to do umount if so
++    if (is_isolated_process(ruid)) {
++        susfs_set_current_proc_no_su();
++        susfs_set_current_proc_umounted();
++        susfs_set_current_proc_umounted_for_zygote_next();
++        goto do_susfs_work;
++    }
++
++    // - Since ksu maanger app uid is excluded in allow_list_arr, so ksu_uid_should_umount(manager_uid)
++    //   will always return true, that's why we need to explicitly check if new_uid belongs to
++    //   ksu manager.
++    // - Disable seccomp restriction for KSU manager since running with "su" will disable seccomp anyway
++    if (likely(ksu_is_manager_appid_valid()) && unlikely(is_uid_manager(ruid))) {
++        disable_seccomp();
++        pr_info("install fd for manager: %d\n", ruid);
++        ksu_install_fd();
 +        return 0;
 +    }
 +
-+    // Check if spawned process is normal user app and needs to be umounted
++    // - Check if spawned process is normal user app and needs to be umounted
++    // - Now app_profile for webview_zygote is available in KernelSU manager
 +    if (likely(is_appuid(ruid) && ksu_uid_should_umount(ruid))) {
 +        susfs_set_current_proc_no_su();
 +        susfs_set_current_proc_umounted();
 +        susfs_set_current_proc_umounted_for_zygote_next();
 +        goto do_susfs_work;
-     }
- 
--    // Handle kernel umount
--    ksu_handle_umount(old_uid, new_uid);
++    }
++
 +    // Disable seccomp restriction for root allowed apps since running with "su" will disable seccomp anyway
 +    if (ksu_is_allow_uid_for_current(ruid)) {
 +        disable_seccomp();
 +        return 0;
 +    }
- 
++
 +    // Process not umounted but also root not allowed
 +    susfs_set_current_proc_no_su();
-     return 0;
++    return 0;
 +
 +do_susfs_work:
 +    {
@@ -1745,9 +1725,11 @@ index d3f3ac49..4ca6e5f0 100644
 +
 +    return 0;
 +
- }
- 
++}
++
  void __init ksu_setuid_hook_init(void)
+ {
+     ksu_kernel_umount_init();
 diff --git a/kernel/hook/setuid_hook.h b/kernel/hook/setuid_hook.h
 index 3a3dfea8..b8486238 100644
 --- a/kernel/hook/setuid_hook.h
@@ -1773,27 +1755,16 @@ index 95c9edb1..7f2870a8 100644
  extern struct selinux_policy *backup_sepolicy;
  extern bool ksu_no_custom_rc;
 diff --git a/kernel/policy/allowlist.c b/kernel/policy/allowlist.c
-index 8cf50d6a..4dc879e8 100644
+index 879d58b4..11ab7d42 100644
 --- a/kernel/policy/allowlist.c
 +++ b/kernel/policy/allowlist.c
-@@ -19,7 +19,6 @@
- 
- #include "klog.h" // IWYU pragma: keep
- #include "ksu.h"
--#include "feature/kernel_umount.h"
- #include "runtime/ksud_boot.h"
- #include "selinux/selinux.h"
- #include "policy/allowlist.h"
-@@ -295,13 +294,7 @@ bool ksu_uid_should_umount(uid_t uid)
+@@ -294,10 +294,7 @@ bool ksu_uid_should_umount(uid_t uid)
  {
      struct app_profile *profile;
      bool res;
 -    if (likely(ksu_is_manager_appid_valid()) && unlikely(ksu_get_manager_appid() == uid % PER_USER_RANGE)) {
 -        // we should not umount on manager!
 -        return false;
--    }
--    if (unlikely(uid == WEBVIEW_ZYGOTE_UID)) {
--        return ksu_webview_zygote_umount_enabled;
 -    }
 +
  #ifdef CONFIG_KSU_DISABLE_POLICY
