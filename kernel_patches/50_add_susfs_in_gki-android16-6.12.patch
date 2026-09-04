@@ -410,7 +410,7 @@ index bdc243fc4..72d94d225 100644
  	if (unlikely(error))
  		return error;
  	error = mnt_want_write(path.mnt);
-@@ -3903,24 +4055,60 @@ static int do_tmpfile(struct nameidata *nd, unsigned flags,
+@@ -3903,24 +4055,61 @@ static int do_tmpfile(struct nameidata *nd, unsigned flags,
  	mnt_drop_write(path.mnt);
  out:
  	path_put(&path);
@@ -467,11 +467,12 @@ index bdc243fc4..72d94d225 100644
 +	int old_dfd = nd->dfd;
 +	bool is_nd_state_root_preset = (nd->state & ND_ROOT_PRESET);
 +	struct filename *fake_filename = NULL;
++	struct filename *old_name = nd->name;
 +#endif // #ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
  	struct file *file;
  	int error;
  
-@@ -3937,10 +4125,31 @@ static struct file *path_openat(struct nameidata *nd,
+@@ -3937,10 +4126,33 @@ static struct file *path_openat(struct nameidata *nd,
  		while (!(error = link_path_walk(s, nd)) &&
  		       (s = open_last_lookups(nd, file, op)) != NULL)
  			;
@@ -497,13 +498,15 @@ index bdc243fc4..72d94d225 100644
  		terminate_walk(nd);
  	}
 +#ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
-+	if (fake_filename && !IS_ERR(fake_filename))
++	if (fake_filename && !IS_ERR(fake_filename)) {
++		nd->name = old_name;
 +		putname(fake_filename);
++	}
 +#endif // #ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
  	if (likely(!error)) {
  		if (likely(file->f_mode & FMODE_OPENED))
  			return file;
-@@ -5251,6 +5460,11 @@ int readlink_copy(char __user *buffer, int buflen, const char *link)
+@@ -5251,6 +5463,11 @@ int readlink_copy(char __user *buffer, int buflen, const char *link)
   *
   * Does not call security hook.
   */
@@ -515,7 +518,7 @@ index bdc243fc4..72d94d225 100644
  int vfs_readlink(struct dentry *dentry, char __user *buffer, int buflen)
  {
  	struct inode *inode = d_inode(dentry);
-@@ -5260,7 +5474,18 @@ int vfs_readlink(struct dentry *dentry, char __user *buffer, int buflen)
+@@ -5260,7 +5477,18 @@ int vfs_readlink(struct dentry *dentry, char __user *buffer, int buflen)
  
  	if (unlikely(!(inode->i_opflags & IOP_DEFAULT_READLINK))) {
  		if (unlikely(inode->i_op->readlink))
@@ -534,7 +537,7 @@ index bdc243fc4..72d94d225 100644
  
  		if (!d_is_symlink(dentry))
  			return -EINVAL;
-@@ -5276,6 +5501,15 @@ int vfs_readlink(struct dentry *dentry, char __user *buffer, int buflen)
+@@ -5276,6 +5504,15 @@ int vfs_readlink(struct dentry *dentry, char __user *buffer, int buflen)
  		if (IS_ERR(link))
  			return PTR_ERR(link);
  	}
