@@ -38,7 +38,7 @@ index 85932d39..f15b42e2 100644
  
  ccflags-y += -I$(srctree)/security/selinux -I$(srctree)/security/selinux/include
 diff --git a/kernel/Kconfig b/kernel/Kconfig
-index 88e22811..5c169f59 100644
+index 88e22811..fcb0e664 100644
 --- a/kernel/Kconfig
 +++ b/kernel/Kconfig
 @@ -2,7 +2,6 @@ menu "KernelSU"
@@ -49,7 +49,7 @@ index 88e22811..5c169f59 100644
  	default y
  	help
  	  Enable kernel-level root privileges on Android System.
-@@ -35,12 +34,95 @@ config KSU_DISABLE_POLICY
+@@ -35,12 +34,98 @@ config KSU_DISABLE_POLICY
  	  Escalation will always use the default full root profile, and
  	  non-root handling will follow the global umount policy only.
  
@@ -75,15 +75,17 @@ index 88e22811..5c169f59 100644
 +	  - Use "add_sus_path_loop" instead of "add_sus_path" if the user-defined path is frequently modified.
 +	  - Use with cautious as it may cause performance loss and will be vulnerable to side channel attacks,
 +	  	just disable this feature if it doesn't work for you or you don't need it at all.
-+	  - Effective only on zygote spawned user app process with uid >= 10000.
++	  - Effective only on zygote/zygote_next spawned user app process that is marked with TIF_PROC_UMOUNTED.
 +
 +config KSU_SUSFS_SUS_MOUNT
 +	bool "Enable to hide suspicious mounts"
 +	depends on KSU_SUSFS
 +	default y
 +	help
-+	  - Automatically assign fake mnt_id and fake mnt_group_id for mounts mounted by ksu process until /sdcard is  decrypted, this is to evade from mnt_id/mnt_group_id gap detections.
++	  - Automatically assign fake mnt_id and fake mnt_group_id for mounts mounted by ksu process until
++	    /sdcard is  decrypted, this is to evade from mnt_id/mnt_group_id gap detections.
 +	  - Allow hiding all sus mounts from /proc/self/[mounts|mountinfo|mountstat] for non-su processes.
++	  - Effective only on zygote/zygote_next spawned user app process that is marked with TIF_PROC_UMOUNTED.
 +
 +config KSU_SUSFS_SUS_KSTAT
 +	bool "Enable to spoof suspicious kstat"
@@ -91,7 +93,7 @@ index 88e22811..5c169f59 100644
 +	default y
 +	help
 +	  - Allow spoofing the kstat of user-defined file/directory.
-+	  - Effective only on zygote spawned user app process with uid >= 10000.
++	  - Effective on all processes with (uid % 100000) >= 10000.
 +
 +config KSU_SUSFS_SPOOF_UNAME
 +	bool "Enable to spoof uname"
@@ -134,7 +136,7 @@ index 88e22811..5c169f59 100644
 +	  - Allow redirecting a target path to be opened with another user-defined path.
 +	  - Both target path and redirected path must be existed before they can be added to the kernel.
 +	  - Users have to take care of the selinux permission of both target path and redirected path by themselves.
-+	  - OPEN_REDIRECT does not bypass detections, but users may try other feature like SUS_KSTAT to bypass some of them.
++	  - OPEN_REDIRECT does not bypass some detections by default, but users can work with SUS_KSTAT to bypass them.
 +	  - Effective only on processes with pre-defined uid scheme.
 +
 +config KSU_SUSFS_SUS_MAP
@@ -146,7 +148,8 @@ index 88e22811..5c169f59 100644
 +	  - It does NOT support hiding for anon memory.
 +	  - It does NOT hide any inline hooks or plt hooks cause by the injected library itself.
 +	  - It may not be able to evade detections by apps that implement a good injection detection.
-+	  - Effective only on zygote spawned umounted user app process >= 10000.
++	  - Effective only on zygote/zygote_next spawned user app process that is marked with TIF_PROC_UMOUNTED
++	    and with (uid % 100000) >= 10000.
 +
 +endmenu
  
@@ -1112,7 +1115,7 @@ index fbb6c44f..1b34903f 100644
  {
      struct policydb *policydb;
 diff --git a/kernel/feature/sucompat.c b/kernel/feature/sucompat.c
-index 3418600c..e2af260d 100644
+index 3418600c..e8a4af2f 100644
 --- a/kernel/feature/sucompat.c
 +++ b/kernel/feature/sucompat.c
 @@ -1,6 +1,3 @@
@@ -1193,7 +1196,7 @@ index 3418600c..e2af260d 100644
  static char __user *ksud_user_path(void)
  {
      static const char ksud_path[] = KSUD_PATH;
-@@ -70,210 +88,187 @@ static char __user *ksud_user_path(void)
+@@ -70,210 +88,190 @@ static char __user *ksud_user_path(void)
      return userspace_stack_buffer(ksud_path, sizeof(ksud_path));
  }
  
@@ -1367,28 +1370,28 @@ index 3418600c..e2af260d 100644
 -    if (execveat && ((int)PT_REGS_PARM1(regs) != AT_FDCWD || (int)PT_REGS_PARM5(regs) != 0))
 -        goto do_orig_execve;
 +    if (unlikely(!filename_ptr))
-+        return 0;
++        return -EINVAL;
  
 -    if (unlikely(!filename_user))
 -        goto do_orig_execve;
 +    filename = *filename_ptr;
 +    if (IS_ERR(filename))
-+        return 0;
++        return -EINVAL;
  
 -    if (!ksu_is_allow_uid_for_current(current_uid().val))
 -        goto do_orig_execve;
 +    if (!ksu_handle_execveat_init(filename, (struct user_arg_ptr*)argv_user, (struct user_arg_ptr*)envp_user))
-+        return 0;
++        return -EINVAL;
  
 -    addr = untagged_addr((unsigned long)*filename_user);
 -    fn = (const char __user *)addr;
 -    memset(path, 0, sizeof(path));
 +    if (!(__ksu_is_allow_uid_for_current(current_uid().val)))
-+        return 0;
++        return -EINVAL;
  
 -    ret = strncpy_from_user(path, fn, sizeof(path));
 +    if (likely(memcmp(filename->name, su_path, sizeof(su_path))))
-+        return 0;
++        return -EINVAL;
  
 -    if (ret < 0) {
 -        pr_warn("Access filename when execve failed: %ld", ret);
@@ -1396,20 +1399,24 @@ index 3418600c..e2af260d 100644
 +    if (current_chrooted())
 +    {
 +        pr_err("ksu_handle_execveat_sucompat: su found but NOT allowed! Because current process is running in chrooted environment\n");
-+        return 0;
++        return -EINVAL;
      }
  
 -    if (likely(memcmp(path, su_path, sizeof(su_path))))
 -        goto do_orig_execve;
--
++    pr_info("ksu_handle_execveat_sucompat: su found\n");
+ 
 -    pr_info("sys_execve su found\n");
--
++    memcpy((void *)filename->name, ksud_path, sizeof(ksud_path));
+ 
 -    tmp_fd = get_unused_fd_flags(O_CLOEXEC);
 -    if (tmp_fd < 0) {
 -        pr_err("alloc tmp fd err: %d\n", tmp_fd);
 -        goto do_orig_execve;
 -    }
-+    pr_info("ksu_handle_execveat_sucompat: su found\n");
++    pending_sucompat = ksu_sulog_capture_sucompat(filename->name, (struct user_arg_ptr*)argv_user, GFP_KERNEL);
++
++    ret = escape_with_root_profile();
  
 -    old_cred = override_creds(ksu_cred);
 -    ksud_file = filp_open(KSUD_PATH, O_PATH, 0);
@@ -1418,8 +1425,11 @@ index 3418600c..e2af260d 100644
 -        pr_err("open ksud err: %ld\n", PTR_ERR(ksud_file));
 -        put_unused_fd(tmp_fd);
 -        goto do_orig_execve;
--    }
-+    memcpy((void *)filename->name, ksud_path, sizeof(ksud_path));
++    const char __user *argv_user_ptr = get_user_arg_ptr(*((struct user_arg_ptr*)argv_user), 0);
++    if (!argv_user_ptr || IS_ERR(argv_user_ptr)) {
++        pr_err("!argv_user_ptr || IS_ERR(argv_user_ptr)\n");
++        return -EINVAL;
+     }
  
 -    fd_install(tmp_fd, ksud_file);
 -
@@ -1436,15 +1446,17 @@ index 3418600c..e2af260d 100644
 -    regs->__PT_PARM3_REG = (unsigned long)argv_user;
 -    regs->__PT_PARM2_REG = empty_user_path();
 -    regs->__PT_PARM1_REG = tmp_fd;
-+    pending_sucompat = ksu_sulog_capture_sucompat(filename->name, (struct user_arg_ptr*)argv_user, GFP_KERNEL);
++    ksu_sulog_emit_pending(pending_sucompat, ret, GFP_KERNEL);
  
-     ret = escape_with_root_profile();
--    if (ret) {
+-    ret = escape_with_root_profile();
+     if (ret) {
 -        pr_err("escape_with_root_profile failed: %ld\n", ret);
--    }
--    ksu_sulog_emit_pending(pending_sucompat, ret, GFP_KERNEL);
-+    if (ret)
 +        pr_err("escape_with_root_profile() failed: %d\n", ret);
++        return -EINVAL;
+     }
+-    ksu_sulog_emit_pending(pending_sucompat, ret, GFP_KERNEL);
++    return 0;
++}
  
 -    ret = ksu_syscall_table[__NR_execveat](regs);
 -    if (ret < 0) {
@@ -1461,27 +1473,15 @@ index 3418600c..e2af260d 100644
 -        if (su_fd < 0) {
 -            pr_warn("install su session fd failed: %d\n", su_fd);
 -        }
-+    const char __user *argv_user_ptr = get_user_arg_ptr(*((struct user_arg_ptr*)argv_user), 0);
-+    if (!argv_user_ptr || IS_ERR(argv_user_ptr)) {
-+        pr_err("!argv_user_ptr || IS_ERR(argv_user_ptr)\n");
-+        return 0;
-     }
+-    }
 -    return ret;
++extern struct static_key_true is_first_zygote;
  
 -do_orig_execve:
 -    return ksu_syscall_table[orig_nr](regs);
-+    ksu_sulog_emit_pending(pending_sucompat, ret, GFP_KERNEL);
-+    return 0;
- }
- 
--long ksu_handle_execve_sucompat(const char __user **filename_user, int orig_nr, struct pt_regs *regs)
-+extern struct static_key_true is_first_zygote;
-+
 +int ksu_handle_execveat(int *fd, struct filename **filename_ptr, void *argv,
 +            void *envp, int *flags)
- {
--    return ksu_handle_execve_sucompat_common(filename_user, (const char __user *const __user *)PT_REGS_PARM2(regs),
--                                             PT_REGS_PARM3(regs), false, orig_nr, regs);
++{
 +    if (static_branch_unlikely(&is_first_zygote))
 +        (void)ksu_handle_execveat_ksud(fd, filename_ptr, argv, envp, flags);
 +
@@ -1489,12 +1489,12 @@ index 3418600c..e2af260d 100644
 +                        flags);
  }
  
--long ksu_handle_execveat_sucompat(const char __user **filename_user, int orig_nr, struct pt_regs *regs)
+-long ksu_handle_execve_sucompat(const char __user **filename_user, int orig_nr, struct pt_regs *regs)
 +int ksu_handle_faccessat(int *dfd, struct filename **filename, int *mode,
 +             int *__unused_flags)
  {
--    return ksu_handle_execve_sucompat_common(filename_user, (const char __user *const __user *)PT_REGS_PARM3(regs),
--                                             PT_REGS_SYSCALL_PARM4(regs), true, orig_nr, regs);
+-    return ksu_handle_execve_sucompat_common(filename_user, (const char __user *const __user *)PT_REGS_PARM2(regs),
+-                                             PT_REGS_PARM3(regs), false, orig_nr, regs);
 +    if (unlikely(IS_ERR(*filename) || (*filename)->name == NULL))
 +        return 0;
 +
@@ -1509,8 +1509,12 @@ index 3418600c..e2af260d 100644
 +    pr_info("ksu_handle_faccessat: su->sh!\n");
 +    memcpy((void *)((*filename)->name), sh_path, sizeof(sh_path));
 +    return 0;
-+}
-+
+ }
+ 
+-long ksu_handle_execveat_sucompat(const char __user **filename_user, int orig_nr, struct pt_regs *regs)
+-{
+-    return ksu_handle_execve_sucompat_common(filename_user, (const char __user *const __user *)PT_REGS_PARM3(regs),
+-                                             PT_REGS_SYSCALL_PARM4(regs), true, orig_nr, regs);
 +int ksu_handle_stat(int *dfd, struct filename **filename, int *flags) {
 +    if (unlikely(IS_ERR(*filename) || (*filename)->name == NULL))
 +        return 0;
@@ -1567,7 +1571,7 @@ index 5e2cfe11..a4a6a7de 100644
 +#endif
 \ No newline at end of file
 diff --git a/kernel/hook/setuid_hook.c b/kernel/hook/setuid_hook.c
-index d3f3ac49..8210c0fa 100644
+index d3f3ac49..1f1e91be 100644
 --- a/kernel/hook/setuid_hook.c
 +++ b/kernel/hook/setuid_hook.c
 @@ -11,6 +11,8 @@
@@ -1579,7 +1583,7 @@ index d3f3ac49..8210c0fa 100644
  
  #include "policy/allowlist.h"
  #include "hook/setuid_hook.h"
-@@ -18,43 +20,142 @@
+@@ -18,43 +20,138 @@
  #include "manager/manager_identity.h"
  #include "infra/seccomp_cache.h"
  #include "supercall/supercall.h"
@@ -1624,7 +1628,6 @@ index d3f3ac49..8210c0fa 100644
 +        disable_seccomp();
 +        pr_info("install fd for manager: %d\n", ruid);
          ksu_install_fd();
-+        ksu_install_su_fd();
          return 0;
      }
  
@@ -1647,7 +1650,6 @@ index d3f3ac49..8210c0fa 100644
 +
 +    // Disable seccomp restriction for root allowed apps since running with "su" will disable seccomp anyway
 +    if (ksu_is_allow_uid_for_current(ruid)) {
-+        ksu_install_su_fd();
 +        disable_seccomp();
 +        return 0;
      }
@@ -1687,7 +1689,6 @@ index d3f3ac49..8210c0fa 100644
 +        disable_seccomp();
 +        pr_info("install fd for manager: %d\n", ruid);
 +        ksu_install_fd();
-+        ksu_install_su_fd();
 +        return 0;
 +    }
 +
@@ -1702,7 +1703,6 @@ index d3f3ac49..8210c0fa 100644
 +
 +    // Disable seccomp restriction for root allowed apps since running with "su" will disable seccomp anyway
 +    if (ksu_is_allow_uid_for_current(ruid)) {
-+        ksu_install_su_fd();
 +        disable_seccomp();
 +        return 0;
 +    }
