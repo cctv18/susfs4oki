@@ -94,11 +94,13 @@ struct st_susfs_sus_kstat {
 };
 
 struct st_susfs_sus_kstat_hlist {
+	struct hlist_node                       node;
 	unsigned long                           target_ino;
 	unsigned long                           target_dev;
+	struct kstatfs                          spoofed_kstatfs;
+	int                                     spoofed_mnt_id;
 	bool                                    is_fuse;
 	struct st_susfs_sus_kstat               info;
-	struct hlist_node                       node;
 };
 #endif
 
@@ -137,6 +139,7 @@ struct st_susfs_open_redirect {
 };
 
 struct st_susfs_open_redirect_hlist {
+	struct hlist_node                       node;
 	unsigned long                           target_ino;
 	unsigned long                           target_dev;
 	unsigned long                           redirected_ino;
@@ -145,7 +148,6 @@ struct st_susfs_open_redirect_hlist {
 	struct kstatfs                          spoofed_kstatfs;
 	struct st_susfs_open_redirect           info;
 	bool                                    reversed_lookup_only;
-	struct hlist_node                       node;
 };
 #endif
 
