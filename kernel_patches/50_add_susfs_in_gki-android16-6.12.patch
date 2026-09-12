@@ -2159,6 +2159,51 @@ index 83c5d3feb..43b0b65f0 100644
  
  	error = statfs_by_dentry(path->dentry, buf);
  	if (!error)
+diff --git a/fs/super.c b/fs/super.c
+index 6a8a1b67a..cecc61130 100644
+--- a/fs/super.c
++++ b/fs/super.c
+@@ -37,9 +37,17 @@
+ #include <linux/lockdep.h>
+ #include <linux/user_namespace.h>
+ #include <linux/fs_context.h>
++#ifdef CONFIG_KSU_SUSFS
++#include <linux/susfs_def.h>
++#endif // #ifdef CONFIG_KSU_SUSFS
+ #include <uapi/linux/mount.h>
+ #include "internal.h"
+ 
++#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
++extern bool susfs_is_current_ksu_domain(void);
++extern struct static_key_true susfs_is_sdcard_android_data_not_decrypted;
++#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
++
+ static int thaw_super_locked(struct super_block *sb, enum freeze_holder who);
+ 
+ static LIST_HEAD(super_blocks);
+@@ -1206,6 +1214,22 @@ int get_anon_bdev(dev_t *p)
+ {
+ 	int dev;
+ 
++#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
++	if (static_branch_unlikely(&susfs_is_sdcard_android_data_not_decrypted)) {
++		if (susfs_is_current_ksu_domain()) {
++			dev = ida_alloc_range(&unnamed_dev_ida, DEFAULT_KSU_MNT_MINOR_DEV, (1 << MINORBITS) - 1,
++				GFP_ATOMIC);
++			if (dev == -ENOSPC)
++				dev = -EMFILE;
++			if (dev < 0)
++				return dev;
++
++			*p = MKDEV(0, dev);
++			return 0;
++		}
++	}
++#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
++
+ 	/*
+ 	 * Many userspace utilities consider an FSID of 0 invalid.
+ 	 * Always return at least 1 from get_anon_bdev.
 diff --git a/kernel/kallsyms.c b/kernel/kallsyms.c
 index a9a0ca605..a6308f3f5 100644
 --- a/kernel/kallsyms.c
