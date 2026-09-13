@@ -2013,7 +2013,7 @@ index ef50573c7..60b31f5e4 100644
  
  	if (path.mnt->mnt_root == path.dentry)
 diff --git a/fs/statfs.c b/fs/statfs.c
-index 96d1c3edf..f4054d0a7 100644
+index 96d1c3edf..37379f61a 100644
 --- a/fs/statfs.c
 +++ b/fs/statfs.c
 @@ -9,8 +9,20 @@
@@ -2066,7 +2066,7 @@ index 96d1c3edf..f4054d0a7 100644
  int vfs_get_fsid(struct dentry *dentry, __kernel_fsid_t *fsid)
  {
  	struct kstatfs st;
-@@ -87,7 +121,40 @@ int vfs_statfs(const struct path *path, struct kstatfs *buf)
+@@ -87,6 +121,39 @@ int vfs_statfs(const struct path *path, struct kstatfs *buf)
  {
  	int error;
  
@@ -2075,8 +2075,9 @@ index 96d1c3edf..f4054d0a7 100644
 +		struct inode *inode = d_backing_inode(path->dentry);
 +		bool is_fuse = false;
 +		if (susfs_is_inode_sus_kstat(inode, &is_fuse)) {
-+			error = susfs_statfs_by_dentry(path->dentry, buf, &is_fuse);
-+			goto bypass_orig_flow;
++			// - here we do not call calculate_f_flags() as buf->f_flags will be spoofed
++			//   by susfs_statfs_by_dentry().
++			return susfs_statfs_by_dentry(path->dentry, buf, &is_fuse);
 +		}
 +	}
 +#endif // #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
@@ -2089,7 +2090,9 @@ index 96d1c3edf..f4054d0a7 100644
 +			dput(no_sus_vfsmnt->mnt_root);
 +			mntput(no_sus_vfsmnt);
 +			error = statfs_by_dentry(path->dentry, buf);
-+			goto bypass_orig_flow;
++			if (!error)
++				buf->f_flags = calculate_f_flags(path->mnt);
++			return error;
 +		}
 +		error = statfs_by_dentry(no_sus_vfsmnt->mnt_root, buf);
 +		if (!error)
@@ -2101,12 +2104,8 @@ index 96d1c3edf..f4054d0a7 100644
 +#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 +
  	error = statfs_by_dentry(path->dentry, buf);
-+#if defined(CONFIG_KSU_SUSFS_SUS_MOUNT) || defined(CONFIG_KSU_SUSFS_SUS_KSTAT)
-+bypass_orig_flow:
-+#endif // #if defined(CONFIG_KSU_SUSFS_SUS_MOUNT) || defined(CONFIG_KSU_SUSFS_SUS_KSTAT)
  	if (!error)
  		buf->f_flags = calculate_f_flags(path->mnt);
- 	return error;
 diff --git a/fs/super.c b/fs/super.c
 index 904839eb7..3e70abd5b 100644
 --- a/fs/super.c
