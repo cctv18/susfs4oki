@@ -1954,7 +1954,7 @@ index 6d29cab85..77213f638 100644
  	if (error >= 0)
  		error = buf.error;
 diff --git a/fs/stat.c b/fs/stat.c
-index adb071bc9..9586d3e65 100644
+index adb071bc9..f30b435ad 100644
 --- a/fs/stat.c
 +++ b/fs/stat.c
 @@ -20,12 +20,28 @@
@@ -2050,15 +2050,19 @@ index adb071bc9..9586d3e65 100644
  	fdput(f);
  	return error;
  }
-@@ -250,6 +312,15 @@ static int vfs_statx_path(struct path *path, int flags, struct kstat *stat,
+@@ -250,6 +312,19 @@ static int vfs_statx_path(struct path *path, int flags, struct kstat *stat,
  {
  	int error = vfs_getattr(path, stat, request_mask, flags);
  
 +#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
 +	if (stat->result_mask & (STATX_SUS_KSTAT_FUSE | STATX_SUS_KSTAT)) {
 +		stat->result_mask &= ~(STATX_SUS_KSTAT_FUSE | STATX_SUS_KSTAT);
-+		if (request_mask & STATX_MNT_ID_UNIQUE)
++		if (request_mask & STATX_MNT_ID_UNIQUE) {
 +			stat->mnt_id = susfs_get_non_sus_mnt_id_unique_from_mnt(real_mount(path->mnt));
++			stat->result_mask |= STATX_MNT_ID_UNIQUE;
++		} else {
++			stat->result_mask |= STATX_MNT_ID;
++		}
 +		goto bypass_orig_flow;
 +	}
 +#endif // #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
@@ -2066,7 +2070,7 @@ index adb071bc9..9586d3e65 100644
  	if (request_mask & STATX_MNT_ID_UNIQUE) {
  		stat->mnt_id = real_mount(path->mnt)->mnt_id_unique;
  		stat->result_mask |= STATX_MNT_ID_UNIQUE;
-@@ -258,6 +329,9 @@ static int vfs_statx_path(struct path *path, int flags, struct kstat *stat,
+@@ -258,6 +333,9 @@ static int vfs_statx_path(struct path *path, int flags, struct kstat *stat,
  		stat->result_mask |= STATX_MNT_ID;
  	}
  
@@ -2076,7 +2080,7 @@ index adb071bc9..9586d3e65 100644
  	if (path_mounted(path))
  		stat->attributes |= STATX_ATTR_MOUNT_ROOT;
  	stat->attributes_mask |= STATX_ATTR_MOUNT_ROOT;
-@@ -304,6 +378,17 @@ static int vfs_statx(int dfd, struct filename *filename, int flags,
+@@ -304,6 +382,17 @@ static int vfs_statx(int dfd, struct filename *filename, int flags,
  	unsigned int lookup_flags = getname_statx_lookup_flags(flags);
  	int error;
  
