@@ -2144,10 +2144,10 @@ index 2a37f9f3d..ca4e18cd8 100644
  	if (!error)
  		buf->f_flags = calculate_f_flags(path->mnt);
 diff --git a/fs/super.c b/fs/super.c
-index 7cca243b1..69a9f0fc1 100644
+index 7cca243b1..fdda2a230 100644
 --- a/fs/super.c
 +++ b/fs/super.c
-@@ -37,9 +37,17 @@
+@@ -37,6 +37,9 @@
  #include <linux/lockdep.h>
  #include <linux/user_namespace.h>
  #include <linux/fs_context.h>
@@ -2157,14 +2157,18 @@ index 7cca243b1..69a9f0fc1 100644
  #include <uapi/linux/mount.h>
  #include "internal.h"
  
+@@ -1257,6 +1260,11 @@ void emergency_thaw_all(void)
+ 
+ static DEFINE_IDA(unnamed_dev_ida);
+ 
 +#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 +extern bool susfs_is_current_ksu_domain(void);
 +extern struct static_key_true susfs_is_sdcard_android_data_not_decrypted;
 +#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 +
- static int thaw_super_locked(struct super_block *sb, enum freeze_holder who);
- 
- static LIST_HEAD(super_blocks);
+ /**
+  * get_anon_bdev - Allocate a block device for filesystems which don't have one.
+  * @p: Pointer to a dev_t.
 @@ -1272,6 +1280,22 @@ int get_anon_bdev(dev_t *p)
  {
  	int dev;
