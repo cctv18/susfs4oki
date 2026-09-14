@@ -1805,7 +1805,7 @@ index 879d58b4..11ab7d42 100644
      return !__ksu_is_allow_uid(uid);
  #else
 diff --git a/kernel/policy/app_profile.c b/kernel/policy/app_profile.c
-index 518ef414..4cac7a74 100644
+index 10d03262..33cd6779 100644
 --- a/kernel/policy/app_profile.c
 +++ b/kernel/policy/app_profile.c
 @@ -1,6 +1,3 @@
@@ -1893,8 +1893,8 @@ index 518ef414..4cac7a74 100644
 +    memcpy(&cred->cap_effective, &cap_for_ksud, sizeof(cred->cap_effective));
      memcpy(&cred->cap_permitted, &profile->capabilities.effective, sizeof(cred->cap_permitted));
      memcpy(&cred->cap_bset, &profile->capabilities.effective, sizeof(cred->cap_bset));
- 
-@@ -200,16 +176,13 @@ int escape_with_root_profile(void)
+     if (profile->uid != 0) {
+@@ -204,16 +180,13 @@ int escape_with_root_profile(void)
  
      commit_creds(cred);
  
@@ -1913,7 +1913,7 @@ index 518ef414..4cac7a74 100644
      setup_mount_ns(profile->namespaces);
      ksu_put_root_profile(profile);
      return 0;
-@@ -221,31 +194,16 @@ out_abort_creds:
+@@ -225,31 +198,16 @@ out_abort_creds:
      return ret;
  }
  
