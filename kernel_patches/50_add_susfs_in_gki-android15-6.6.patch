@@ -114,7 +114,7 @@ index 71bd99ce8..26da8eaf9 100644
  	free_bprm(bprm);
  
 diff --git a/fs/namei.c b/fs/namei.c
-index b31b583f1..cd474d316 100644
+index b31b583f1..95dd56a79 100644
 --- a/fs/namei.c
 +++ b/fs/namei.c
 @@ -41,10 +41,21 @@
@@ -554,7 +554,7 @@ index b31b583f1..cd474d316 100644
  	do_delayed_call(&done);
  	return res;
 diff --git a/fs/namespace.c b/fs/namespace.c
-index 97fc42277..32571fabb 100644
+index 97fc42277..8dabeedd3 100644
 --- a/fs/namespace.c
 +++ b/fs/namespace.c
 @@ -32,12 +32,22 @@
