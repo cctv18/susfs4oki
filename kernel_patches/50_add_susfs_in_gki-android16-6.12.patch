@@ -44,16 +44,16 @@ diff --git a/fs/exec.c b/fs/exec.c
 index f5f972488..996267b3d 100644
 --- a/fs/exec.c
 +++ b/fs/exec.c
-@@ -69,6 +69,9 @@
- #include <linux/user_events.h>
- #include <linux/rseq.h>
- #include <linux/ksm.h>
+@@ -50,6 +50,9 @@
+ #include <linux/pid_namespace.h>
+ #include <linux/module.h>
+ #include <linux/namei.h>
 +#ifdef CONFIG_KSU_SUSFS
 +#include <linux/susfs_def.h>
 +#endif
- 
- #include <linux/uaccess.h>
- #include <asm/mmu_context.h>
+ #include <linux/mount.h>
+ #include <linux/security.h>
+ #include <linux/syscalls.h>
 @@ -1910,6 +1913,18 @@ static int bprm_execve(struct linux_binprm *bprm)
  	return retval;
  }
