@@ -41,7 +41,7 @@ index c6963a9a4..e27ac368b 100644
  obj-$(CONFIG_PROC_FS)		+= proc_namespace.o
  obj-$(CONFIG_LEGACY_DIRECT_IO)	+= direct-io.o
 diff --git a/fs/exec.c b/fs/exec.c
-index 71bd99ce8..a44770816 100644
+index 8dc93215b..902097393 100644
 --- a/fs/exec.c
 +++ b/fs/exec.c
 @@ -49,6 +49,9 @@
@@ -72,7 +72,7 @@ index 71bd99ce8..a44770816 100644
  static int do_execveat_common(int fd, struct filename *filename,
  			      struct user_arg_ptr argv,
  			      struct user_arg_ptr envp,
-@@ -1932,10 +1946,28 @@ static int do_execveat_common(int fd, struct filename *filename,
+@@ -1933,10 +1947,28 @@ static int do_execveat_common(int fd, struct filename *filename,
  {
  	struct linux_binprm *bprm;
  	int retval;
@@ -101,7 +101,7 @@ index 71bd99ce8..a44770816 100644
  	/*
  	 * We move the actual failure in case of RLIMIT_NPROC excess from
  	 * set*uid() to execve() because too many poorly written programs
-@@ -2002,6 +2034,10 @@ static int do_execveat_common(int fd, struct filename *filename,
+@@ -2003,6 +2035,10 @@ static int do_execveat_common(int fd, struct filename *filename,
  	}
  
  	retval = bprm_execve(bprm, fd, filename, flags);
@@ -1071,7 +1071,7 @@ index 0641cb3fd..2a979fdff 100644
  		goto out;
  
 diff --git a/fs/proc/base.c b/fs/proc/base.c
-index 68d01c9ab..8c107bc57 100644
+index cf20a8f08..71ee077cf 100644
 --- a/fs/proc/base.c
 +++ b/fs/proc/base.c
 @@ -103,6 +103,10 @@
@@ -1252,7 +1252,7 @@ index 4297287f6..0ce657709 100644
  	show_fd_locks(m, file, files);
  	if (seq_has_overflowed(m))
 diff --git a/fs/proc/task_mmu.c b/fs/proc/task_mmu.c
-index e4380b37f..9a9bd52b2 100644
+index 052e6d7bc..24a441252 100644
 --- a/fs/proc/task_mmu.c
 +++ b/fs/proc/task_mmu.c
 @@ -23,6 +23,9 @@
@@ -1265,7 +1265,7 @@ index e4380b37f..9a9bd52b2 100644
  
  #include <asm/elf.h>
  #include <asm/tlb.h>
-@@ -260,6 +263,14 @@ static void show_vma_header_prefix(struct seq_file *m,
+@@ -389,6 +392,14 @@ static void show_vma_header_prefix(struct seq_file *m,
  	seq_putc(m, ' ');
  }
  
@@ -1323,7 +1323,7 @@ index e4380b37f..9a9bd52b2 100644
  	}
  
  	start = vma->vm_start;
-@@ -892,6 +931,13 @@ static int show_smap(struct seq_file *m, void *v)
+@@ -1040,6 +1079,13 @@ static int show_smap(struct seq_file *m, void *v)
  	struct vm_area_struct *vma = v;
  	struct mem_size_stats mss;
  
@@ -1336,8 +1336,8 @@ index e4380b37f..9a9bd52b2 100644
 +
  	memset(&mss, 0, sizeof(mss));
  
- 	if (!vma_pages(vma))
-@@ -955,7 +1001,14 @@ static int show_smaps_rollup(struct seq_file *m, void *v)
+ 	if (!vma_data_pages(vma))
+@@ -1103,7 +1149,14 @@ static int show_smaps_rollup(struct seq_file *m, void *v)
  
  	vma_start = vma->vm_start;
  	do {
@@ -1385,7 +1385,7 @@ index e4380b37f..9a9bd52b2 100644
  			}
  		}
  	} for_each_vma(vmi, vma);
-@@ -1800,6 +1860,9 @@ static ssize_t pagemap_read(struct file *file, char __user *buf,
+@@ -1948,6 +2008,9 @@ static ssize_t pagemap_read(struct file *file, char __user *buf,
  	while (count && (start_vaddr < end_vaddr)) {
  		int len;
  		unsigned long end;
@@ -1395,7 +1395,7 @@ index e4380b37f..9a9bd52b2 100644
  
  		pm.pos = 0;
  		end = (start_vaddr + PAGEMAP_WALK_SIZE) & PAGEMAP_WALK_MASK;
-@@ -1809,7 +1872,15 @@ static ssize_t pagemap_read(struct file *file, char __user *buf,
+@@ -1957,7 +2020,15 @@ static ssize_t pagemap_read(struct file *file, char __user *buf,
  		ret = mmap_read_lock_killable(mm);
  		if (ret)
  			goto out_free;
@@ -2172,7 +2172,7 @@ index 2a37f9f3d..05d7dfab1 100644
  	if (!error)
  		buf->f_flags = calculate_f_flags(path->mnt);
 diff --git a/fs/super.c b/fs/super.c
-index 7cca243b1..fdda2a230 100644
+index 2d8303d32..505e62bb8 100644
 --- a/fs/super.c
 +++ b/fs/super.c
 @@ -37,6 +37,9 @@
@@ -2185,7 +2185,7 @@ index 7cca243b1..fdda2a230 100644
  #include <uapi/linux/mount.h>
  #include "internal.h"
  
-@@ -1257,6 +1260,11 @@ void emergency_thaw_all(void)
+@@ -1260,6 +1263,11 @@ void emergency_thaw_all(void)
  
  static DEFINE_IDA(unnamed_dev_ida);
  
@@ -2197,7 +2197,7 @@ index 7cca243b1..fdda2a230 100644
  /**
   * get_anon_bdev - Allocate a block device for filesystems which don't have one.
   * @p: Pointer to a dev_t.
-@@ -1272,6 +1280,22 @@ int get_anon_bdev(dev_t *p)
+@@ -1275,6 +1283,22 @@ int get_anon_bdev(dev_t *p)
  {
  	int dev;
  
@@ -2221,7 +2221,7 @@ index 7cca243b1..fdda2a230 100644
  	 * Many userspace utilities consider an FSID of 0 invalid.
  	 * Always return at least 1 from get_anon_bdev.
 diff --git a/kernel/kallsyms.c b/kernel/kallsyms.c
-index 18edd57b5..5ada67f93 100644
+index cd44e9c42..4c6c4c74d 100644
 --- a/kernel/kallsyms.c
 +++ b/kernel/kallsyms.c
 @@ -31,6 +31,9 @@
@@ -2234,7 +2234,7 @@ index 18edd57b5..5ada67f93 100644
  
  #include "kallsyms_internal.h"
  
-@@ -799,8 +802,36 @@ static int s_show(struct seq_file *m, void *p)
+@@ -802,8 +805,36 @@ static int s_show(struct seq_file *m, void *p)
  		seq_printf(m, "%px %c %s\t[%s]\n", value,
  			   type, iter->name, iter->module_name);
  	} else
@@ -2348,7 +2348,7 @@ index c6b0141e4..5a9bf1c58 100644
  	if (copy_to_user(name, &tmp, sizeof(tmp)))
  		return -EFAULT;
 diff --git a/mm/memory.c b/mm/memory.c
-index 51646a051..a610c496f 100644
+index 1f8011193..b5ea74223 100644
 --- a/mm/memory.c
 +++ b/mm/memory.c
 @@ -42,6 +42,9 @@
@@ -2424,7 +2424,7 @@ index 8e40b0941..629658620 100644
  	audit_log_format(ab, " tclass=%s", tclass);
  
 diff --git a/security/selinux/hooks.c b/security/selinux/hooks.c
-index 7851c9fd4..b34c5e8cb 100644
+index 68d1f244e..dd5ce3d8d 100644
 --- a/security/selinux/hooks.c
 +++ b/security/selinux/hooks.c
 @@ -107,6 +107,11 @@
@@ -2439,7 +2439,7 @@ index 7851c9fd4..b34c5e8cb 100644
  
  /* SECMARK reference count */
  static atomic_t selinux_secmark_refcount = ATOMIC_INIT(0);
-@@ -6384,6 +6389,11 @@ static int selinux_setprocattr(const char *name, void *value, size_t size)
+@@ -6385,6 +6390,11 @@ static int selinux_setprocattr(const char *name, void *value, size_t size)
  	u32 mysid = current_sid(), sid = 0, ptsid;
  	int error;
  	char *str = value;
@@ -2451,7 +2451,7 @@ index 7851c9fd4..b34c5e8cb 100644
  
  	/*
  	 * Basic control over ability to set these attributes at all.
-@@ -6414,6 +6424,14 @@ static int selinux_setprocattr(const char *name, void *value, size_t size)
+@@ -6415,6 +6425,14 @@ static int selinux_setprocattr(const char *name, void *value, size_t size)
  			str[size-1] = 0;
  			size--;
  		}
@@ -2467,7 +2467,7 @@ index 7851c9fd4..b34c5e8cb 100644
  						&sid, GFP_KERNEL);
  		if (error == -EINVAL && !strcmp(name, "fscreate")) {
 diff --git a/security/selinux/selinuxfs.c b/security/selinux/selinuxfs.c
-index f01c07499..9bbb9b0a8 100644
+index b8c263457..1403b7404 100644
 --- a/security/selinux/selinuxfs.c
 +++ b/security/selinux/selinuxfs.c
 @@ -44,6 +44,19 @@
@@ -2522,7 +2522,7 @@ index f01c07499..9bbb9b0a8 100644
  	return 0;
  }
  
-@@ -648,20 +680,45 @@ static ssize_t sel_write_context(struct file *file, char *buf, size_t size)
+@@ -624,20 +656,45 @@ static ssize_t sel_write_context(struct file *file, char *buf, size_t size)
  	char *canon = NULL;
  	u32 sid, len;
  	ssize_t length;
@@ -2568,7 +2568,7 @@ index f01c07499..9bbb9b0a8 100644
  	length = -ERANGE;
  	if (len > SIMPLE_TRANSACTION_LIMIT) {
  		pr_err("SELinux: %s:  context size (%u) exceeds "
-@@ -872,6 +929,9 @@ static ssize_t sel_write_access(struct file *file, char *buf, size_t size)
+@@ -848,6 +905,9 @@ static ssize_t sel_write_access(struct file *file, char *buf, size_t size)
  	u16 tclass;
  	struct av_decision avd;
  	ssize_t length;
@@ -2578,7 +2578,7 @@ index f01c07499..9bbb9b0a8 100644
  
  	length = avc_has_perm(current_sid(), SECINITSID_SECURITY,
  			      SECCLASS_SECURITY, SECURITY__COMPUTE_AV, NULL);
-@@ -892,16 +952,46 @@ static ssize_t sel_write_access(struct file *file, char *buf, size_t size)
+@@ -868,16 +928,46 @@ static ssize_t sel_write_access(struct file *file, char *buf, size_t size)
  	if (sscanf(buf, "%s %s %hu", scon, tcon, &tclass) != 3)
  		goto out;
  
