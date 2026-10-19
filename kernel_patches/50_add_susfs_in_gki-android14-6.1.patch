@@ -41,7 +41,7 @@ index 102e4cd2b..a1929dbc8 100644
  obj-y +=	buffer.o direct-io.o mpage.o
  else
 diff --git a/fs/exec.c b/fs/exec.c
-index 28e8203de..7fa4caf80 100644
+index 6999d609d..89bd75bd9 100644
 --- a/fs/exec.c
 +++ b/fs/exec.c
 @@ -49,6 +49,9 @@
@@ -72,7 +72,7 @@ index 28e8203de..7fa4caf80 100644
  static int do_execveat_common(int fd, struct filename *filename,
  			      struct user_arg_ptr argv,
  			      struct user_arg_ptr envp,
-@@ -1910,10 +1924,28 @@ static int do_execveat_common(int fd, struct filename *filename,
+@@ -1911,10 +1925,28 @@ static int do_execveat_common(int fd, struct filename *filename,
  {
  	struct linux_binprm *bprm;
  	int retval;
@@ -101,7 +101,7 @@ index 28e8203de..7fa4caf80 100644
  	/*
  	 * We move the actual failure in case of RLIMIT_NPROC excess from
  	 * set*uid() to execve() because too many poorly written programs
-@@ -1980,6 +2012,10 @@ static int do_execveat_common(int fd, struct filename *filename,
+@@ -1981,6 +2013,10 @@ static int do_execveat_common(int fd, struct filename *filename,
  	}
  
  	retval = bprm_execve(bprm, fd, filename, flags);
@@ -555,10 +555,10 @@ index 8e9c0b567..119b93fca 100644
  	do_delayed_call(&done);
  	return res;
 diff --git a/fs/namespace.c b/fs/namespace.c
-index f22f76d9c..1d7e79262 100644
+index 4d910be7c..572d3c20f 100644
 --- a/fs/namespace.c
 +++ b/fs/namespace.c
-@@ -32,10 +32,20 @@
+@@ -32,11 +32,21 @@
  #include <linux/fs_context.h>
  #include <linux/shmem_fs.h>
  #include <linux/mnt_idmapping.h>
@@ -568,6 +568,7 @@ index f22f76d9c..1d7e79262 100644
  
  #include "pnode.h"
  #include "internal.h"
+ #include <trace/hooks/blk.h>
  
 +#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 +extern bool susfs_is_current_ksu_domain(void);
@@ -579,7 +580,7 @@ index f22f76d9c..1d7e79262 100644
  /* Maximum number of mounts in a mount namespace */
  static unsigned int sysctl_mount_max __read_mostly = 100000;
  
-@@ -144,6 +154,10 @@ static int mnt_alloc_id(struct mount *mnt)
+@@ -145,6 +155,10 @@ static int mnt_alloc_id(struct mount *mnt)
  
  static void mnt_free_id(struct mount *mnt)
  {
@@ -590,7 +591,7 @@ index f22f76d9c..1d7e79262 100644
  	ida_free(&mnt_id_ida, mnt->mnt_id);
  }
  
-@@ -152,7 +166,25 @@ static void mnt_free_id(struct mount *mnt)
+@@ -153,7 +167,25 @@ static void mnt_free_id(struct mount *mnt)
   */
  static int mnt_alloc_group_id(struct mount *mnt)
  {
@@ -616,7 +617,7 @@ index f22f76d9c..1d7e79262 100644
  
  	if (res < 0)
  		return res;
-@@ -202,6 +234,119 @@ int mnt_get_count(struct mount *mnt)
+@@ -203,6 +235,119 @@ int mnt_get_count(struct mount *mnt)
  #endif
  }
  
@@ -736,7 +737,7 @@ index f22f76d9c..1d7e79262 100644
  static struct mount *alloc_vfsmnt(const char *name)
  {
  	struct mount *mnt = kmem_cache_zalloc(mnt_cache, GFP_KERNEL);
-@@ -675,6 +820,20 @@ struct mount *__lookup_mnt(struct vfsmount *mnt, struct dentry *dentry)
+@@ -676,6 +821,20 @@ struct mount *__lookup_mnt(struct vfsmount *mnt, struct dentry *dentry)
  	struct hlist_head *head = m_hash(mnt, dentry);
  	struct mount *p;
  
@@ -757,7 +758,7 @@ index f22f76d9c..1d7e79262 100644
  	hlist_for_each_entry_rcu(p, head, mnt_hash)
  		if (&p->mnt_parent->mnt == mnt && p->mnt_mountpoint == dentry)
  			return p;
-@@ -1019,7 +1178,21 @@ struct vfsmount *vfs_create_mount(struct fs_context *fc)
+@@ -1020,7 +1179,21 @@ struct vfsmount *vfs_create_mount(struct fs_context *fc)
  	if (!fc->root)
  		return ERR_PTR(-EINVAL);
  
@@ -779,7 +780,7 @@ index f22f76d9c..1d7e79262 100644
  	if (!mnt)
  		return ERR_PTR(-ENOMEM);
  
-@@ -1105,8 +1278,42 @@ static struct mount *clone_mnt(struct mount *old, struct dentry *root,
+@@ -1106,8 +1279,42 @@ static struct mount *clone_mnt(struct mount *old, struct dentry *root,
  	struct super_block *sb = old->mnt.mnt_sb;
  	struct mount *mnt;
  	int err;
@@ -822,7 +823,7 @@ index f22f76d9c..1d7e79262 100644
  	if (!mnt)
  		return ERR_PTR(-ENOMEM);
  
-@@ -1124,6 +1331,11 @@ static struct mount *clone_mnt(struct mount *old, struct dentry *root,
+@@ -1125,6 +1332,11 @@ static struct mount *clone_mnt(struct mount *old, struct dentry *root,
  	mnt->mnt.mnt_flags = old->mnt.mnt_flags;
  	mnt->mnt.mnt_flags &= ~(MNT_WRITE_HOLD|MNT_MARKED|MNT_INTERNAL);
  
@@ -834,7 +835,7 @@ index f22f76d9c..1d7e79262 100644
  	atomic_inc(&sb->s_active);
  	mnt->mnt.mnt_userns = mnt_user_ns(&old->mnt);
  	if (!initial_idmapping(mnt->mnt.mnt_userns))
-@@ -3515,6 +3727,9 @@ struct mnt_namespace *copy_mnt_ns(unsigned long flags, struct mnt_namespace *ns,
+@@ -3518,6 +3730,9 @@ struct mnt_namespace *copy_mnt_ns(unsigned long flags, struct mnt_namespace *ns,
  	copy_flags = CL_COPY_UNBINDABLE | CL_EXPIRE;
  	if (user_ns != ns->user_ns)
  		copy_flags |= CL_SHARED_TO_SLAVE;
@@ -844,7 +845,7 @@ index f22f76d9c..1d7e79262 100644
  	new = copy_tree(old, old->mnt.mnt_root, copy_flags);
  	if (IS_ERR(new)) {
  		namespace_unlock();
-@@ -4762,3 +4977,43 @@ static int __init init_fs_namespace_sysctls(void)
+@@ -4765,3 +4980,43 @@ static int __init init_fs_namespace_sysctls(void)
  fs_initcall(init_fs_namespace_sysctls);
  
  #endif /* CONFIG_SYSCTL */
@@ -1010,7 +1011,7 @@ index dd5bc6ffa..5b35cb059 100644
  			   inode_mark->wd, inode->i_ino, inode->i_sb->s_dev,
  			   inotify_mark_user_mask(mark));
 diff --git a/fs/open.c b/fs/open.c
-index 026a4047c..3f32356fc 100644
+index 82d10b7a5..74d26534d 100644
 --- a/fs/open.c
 +++ b/fs/open.c
 @@ -33,6 +33,9 @@
@@ -1071,7 +1072,7 @@ index 026a4047c..3f32356fc 100644
  		goto out;
  
 diff --git a/fs/proc/base.c b/fs/proc/base.c
-index b0ec673a2..27bc58fc2 100644
+index 44904de62..cc03392c4 100644
 --- a/fs/proc/base.c
 +++ b/fs/proc/base.c
 @@ -97,6 +97,10 @@
@@ -1252,7 +1253,7 @@ index 913bef0d2..f9a192b37 100644
  	show_fd_locks(m, file, files);
  	if (seq_has_overflowed(m))
 diff --git a/fs/proc/task_mmu.c b/fs/proc/task_mmu.c
-index d6f37ed84..c760c26f6 100644
+index 37f6cefe0..61331eb7c 100644
 --- a/fs/proc/task_mmu.c
 +++ b/fs/proc/task_mmu.c
 @@ -21,6 +21,9 @@
@@ -1265,7 +1266,7 @@ index d6f37ed84..c760c26f6 100644
  
  #include <asm/elf.h>
  #include <asm/tlb.h>
-@@ -273,6 +276,14 @@ static void show_vma_header_prefix(struct seq_file *m,
+@@ -274,6 +277,14 @@ static void show_vma_header_prefix(struct seq_file *m,
  	seq_putc(m, ' ');
  }
  
@@ -1320,7 +1321,7 @@ index d6f37ed84..c760c26f6 100644
  	}
  
  	start = vma->vm_start;
-@@ -883,6 +921,13 @@ static int show_smap(struct seq_file *m, void *v)
+@@ -884,6 +922,13 @@ static int show_smap(struct seq_file *m, void *v)
  	struct vm_area_struct *vma = v;
  	struct mem_size_stats mss;
  
@@ -1334,7 +1335,7 @@ index d6f37ed84..c760c26f6 100644
  	memset(&mss, 0, sizeof(mss));
  
  	if (!vma_pages(vma))
-@@ -945,7 +990,14 @@ static int show_smaps_rollup(struct seq_file *m, void *v)
+@@ -946,7 +991,14 @@ static int show_smaps_rollup(struct seq_file *m, void *v)
  
  	vma_start = vma->vm_start;
  	do {
@@ -1349,7 +1350,7 @@ index d6f37ed84..c760c26f6 100644
  		last_vma_end = vma->vm_end;
  
  		/*
-@@ -1008,7 +1060,14 @@ static int show_smaps_rollup(struct seq_file *m, void *v)
+@@ -1009,7 +1061,14 @@ static int show_smaps_rollup(struct seq_file *m, void *v)
  
  			/* Case 4 above */
  			if (vma->vm_end > last_vma_end)
@@ -1364,7 +1365,7 @@ index d6f37ed84..c760c26f6 100644
  		}
  		/* Case 2 above */
  	} while ((vma = mas_find(&mas, ULONG_MAX)) != NULL);
-@@ -1741,6 +1800,9 @@ static ssize_t pagemap_read(struct file *file, char __user *buf,
+@@ -1742,6 +1801,9 @@ static ssize_t pagemap_read(struct file *file, char __user *buf,
  	while (count && (start_vaddr < end_vaddr)) {
  		int len;
  		unsigned long end;
@@ -1374,7 +1375,7 @@ index d6f37ed84..c760c26f6 100644
  
  		pm.pos = 0;
  		end = (start_vaddr + PAGEMAP_WALK_SIZE) & PAGEMAP_WALK_MASK;
-@@ -1750,7 +1812,15 @@ static ssize_t pagemap_read(struct file *file, char __user *buf,
+@@ -1751,7 +1813,15 @@ static ssize_t pagemap_read(struct file *file, char __user *buf,
  		ret = mmap_read_lock_killable(mm);
  		if (ret)
  			goto out_free;
@@ -2135,7 +2136,7 @@ index 96d1c3edf..320223f57 100644
  	if (!error)
  		buf->f_flags = calculate_f_flags(path->mnt);
 diff --git a/fs/super.c b/fs/super.c
-index 904839eb7..8d5c08911 100644
+index a50cc4fdc..a4e1d3db1 100644
 --- a/fs/super.c
 +++ b/fs/super.c
 @@ -37,6 +37,9 @@
@@ -2148,7 +2149,7 @@ index 904839eb7..8d5c08911 100644
  #include <uapi/linux/mount.h>
  #include "internal.h"
  
-@@ -1081,6 +1084,11 @@ void emergency_thaw_all(void)
+@@ -1084,6 +1087,11 @@ void emergency_thaw_all(void)
  
  static DEFINE_IDA(unnamed_dev_ida);
  
@@ -2160,7 +2161,7 @@ index 904839eb7..8d5c08911 100644
  /**
   * get_anon_bdev - Allocate a block device for filesystems which don't have one.
   * @p: Pointer to a dev_t.
-@@ -1096,6 +1104,22 @@ int get_anon_bdev(dev_t *p)
+@@ -1099,6 +1107,22 @@ int get_anon_bdev(dev_t *p)
  {
  	int dev;
  
@@ -2184,7 +2185,7 @@ index 904839eb7..8d5c08911 100644
  	 * Many userspace utilities consider an FSID of 0 invalid.
  	 * Always return at least 1 from get_anon_bdev.
 diff --git a/kernel/kallsyms.c b/kernel/kallsyms.c
-index 824bcc7b5..99c753390 100644
+index 5a3ae3365..b58e2ab39 100644
 --- a/kernel/kallsyms.c
 +++ b/kernel/kallsyms.c
 @@ -31,6 +31,9 @@
@@ -2197,7 +2198,7 @@ index 824bcc7b5..99c753390 100644
  
  #include "kallsyms_internal.h"
  
-@@ -856,8 +859,36 @@ static int s_show(struct seq_file *m, void *p)
+@@ -859,8 +862,36 @@ static int s_show(struct seq_file *m, void *p)
  		seq_printf(m, "%px %c %s\t[%s]\n", value,
  			   type, iter->name, iter->module_name);
  	} else
@@ -2312,7 +2313,7 @@ index ba7926d7b..efd4a2772 100644
  	if (copy_to_user(name, &tmp, sizeof(tmp)))
  		return -EFAULT;
 diff --git a/mm/memory.c b/mm/memory.c
-index 58cd1a431..0be8de3f1 100644
+index c17bdc64e..584a3a426 100644
 --- a/mm/memory.c
 +++ b/mm/memory.c
 @@ -79,6 +79,9 @@
@@ -2325,7 +2326,7 @@ index 58cd1a431..0be8de3f1 100644
  
  #include <trace/events/kmem.h>
  #include <trace/hooks/mm.h>
-@@ -5934,6 +5937,11 @@ int __access_remote_vm(struct mm_struct *mm, unsigned long addr, void *buf,
+@@ -5946,6 +5949,11 @@ int __access_remote_vm(struct mm_struct *mm, unsigned long addr, void *buf,
  		void *maddr;
  		struct page *page = NULL;
  
