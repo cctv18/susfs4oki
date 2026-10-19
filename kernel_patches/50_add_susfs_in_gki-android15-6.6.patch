@@ -2424,73 +2424,72 @@ index 8e40b0941..629658620 100644
  	audit_log_format(ab, " tclass=%s", tclass);
  
 diff --git a/security/selinux/hooks.c b/security/selinux/hooks.c
-index 68d1f244e..dd5ce3d8d 100644
+index 68d1f244e..dd997fea1 100644
 --- a/security/selinux/hooks.c
 +++ b/security/selinux/hooks.c
-@@ -107,6 +107,11 @@
+@@ -107,6 +107,10 @@
  #define SELINUX_INODE_INIT_XATTRS 1
  
  struct selinux_state selinux_state;
 +#ifdef CONFIG_KSU_SUSFS
-+extern struct selinux_policy *backup_sepolicy;
 +extern bool ksu_selinux_hide_running __read_mostly;
-+extern int my_security_context_to_sid(struct selinux_policy *policy, const char *scontext, u32 scontext_len, u32 *sid, gfp_t gfp);
++extern int my_security_context_to_sid(const char *scontext, u32 scontext_len, u32 *sid, gfp_t gfp);
 +#endif // #ifdef CONFIG_KSU_SUSFS
  
  /* SECMARK reference count */
  static atomic_t selinux_secmark_refcount = ATOMIC_INIT(0);
-@@ -6385,6 +6390,11 @@ static int selinux_setprocattr(const char *name, void *value, size_t size)
- 	u32 mysid = current_sid(), sid = 0, ptsid;
- 	int error;
- 	char *str = value;
-+#ifdef CONFIG_KSU_SUSFS
-+	bool should_check_current = (likely(!strcmp(name, "current") &&
-+								 current_uid().val >= 10000 &&
-+								 ksu_selinux_hide_running));
-+#endif // #ifdef CONFIG_KSU_SUSFS
- 
- 	/*
- 	 * Basic control over ability to set these attributes at all.
-@@ -6415,6 +6425,14 @@ static int selinux_setprocattr(const char *name, void *value, size_t size)
+@@ -6415,6 +6419,17 @@ static int selinux_setprocattr(const char *name, void *value, size_t size)
  			str[size-1] = 0;
  			size--;
  		}
 +#ifdef CONFIG_KSU_SUSFS
-+		if (should_check_current) {
-+			u32 tmp_sid = 0;
-+			int fake_error = my_security_context_to_sid(backup_sepolicy, value, size, &tmp_sid, GFP_KERNEL);
-+			if (fake_error)
-+				return fake_error;
++		if ((likely(!strcmp(name, "current") &&
++									current_uid().val >= 10000 &&
++									ksu_selinux_hide_running)))
++		{
++			error = my_security_context_to_sid(value, size, &sid, GFP_KERNEL);
++			if (error)
++				return error;
++			goto bypass_orig_flow;
 +		}
 +#endif // #ifdef CONFIG_KSU_SUSFS
  		error = security_context_to_sid(value, size,
  						&sid, GFP_KERNEL);
  		if (error == -EINVAL && !strcmp(name, "fscreate")) {
+@@ -6446,6 +6461,9 @@ static int selinux_setprocattr(const char *name, void *value, size_t size)
+ 			return error;
+ 	}
+ 
++#ifdef CONFIG_KSU_SUSFS
++bypass_orig_flow:
++#endif // #ifdef CONFIG_KSU_SUSFS
+ 	new = prepare_creds();
+ 	if (!new)
+ 		return -ENOMEM;
 diff --git a/security/selinux/selinuxfs.c b/security/selinux/selinuxfs.c
-index b8c263457..1403b7404 100644
+index b8c263457..10b36e90d 100644
 --- a/security/selinux/selinuxfs.c
 +++ b/security/selinux/selinuxfs.c
-@@ -44,6 +44,19 @@
+@@ -44,6 +44,18 @@
  #include "conditional.h"
  #include "ima.h"
  
 +#ifdef CONFIG_KSU_SUSFS
-+extern struct selinux_policy *backup_sepolicy;
 +extern struct page *fake_status;
 +extern struct static_key_false fake_status_initialize_key;
 +extern bool ksu_selinux_hide_running __read_mostly;
 +extern bool ksu_selinux_hide_enabled __read_mostly;
 +extern void initialize_fake_status(void);
-+extern void my_security_compute_av_user(struct selinux_policy *policy, u32 ssid, u32 tsid, u16 tclass, struct av_decision *avd);
-+extern int my_security_sid_to_context(struct selinux_policy *policy, u32 sid, char **scontext, u32 *scontext_len);
-+extern int my_security_context_to_sid(struct selinux_policy *policy, const char *scontext, u32 scontext_len, u32 *sid, gfp_t gfp);
-+extern int my_security_context_str_to_sid(struct selinux_policy *policy, const char *scontext, u32 *sid, gfp_t gfp);
++extern int my_security_sid_to_context(u32 sid, char **scontext, u32 *scontext_len);
++extern int my_security_context_to_sid(const char *scontext, u32 scontext_len, u32 *sid, gfp_t gfp);
++extern int my_security_context_str_to_sid(const char *scontext, u32 *sid, gfp_t gfp);
++extern void my_security_compute_av_user(u32 ssid, u32 tsid, u16 tclass, struct av_decision *avd);
 +#endif // #ifdef CONFIG_KSU_SUSFS
 +
  enum sel_inos {
  	SEL_ROOT_INO = 2,
  	SEL_LOAD,	/* load policy */
-@@ -219,12 +232,31 @@ static const struct file_operations sel_handle_unknown_ops = {
+@@ -219,12 +231,32 @@ static const struct file_operations sel_handle_unknown_ops = {
  static int sel_open_handle_status(struct inode *inode, struct file *filp)
  {
  	struct page    *status = selinux_kernel_status_page();
@@ -2519,139 +2518,190 @@ index b8c263457..1403b7404 100644
 +			initialize_fake_status();
 +	}
 +#endif // #ifdef CONFIG_KSU_SUSFS
++
  	return 0;
  }
  
-@@ -624,20 +656,45 @@ static ssize_t sel_write_context(struct file *file, char *buf, size_t size)
- 	char *canon = NULL;
- 	u32 sid, len;
- 	ssize_t length;
-+#ifdef CONFIG_KSU_SUSFS
-+	bool should_check_current = (likely(current_uid().val >= 10000 && ksu_selinux_hide_running));
-+#endif // #ifdef CONFIG_KSU_SUSFS
- 
- 	length = avc_has_perm(current_sid(), SECINITSID_SECURITY,
- 			      SECCLASS_SECURITY, SECURITY__CHECK_CONTEXT, NULL);
- 	if (length)
- 		goto out;
+@@ -652,6 +684,47 @@ static ssize_t sel_write_context(struct file *file, char *buf, size_t size)
+ 	return length;
+ }
  
 +#ifdef CONFIG_KSU_SUSFS
-+	if (should_check_current) {
-+		length = my_security_context_to_sid(backup_sepolicy, buf, size, &sid, GFP_KERNEL);
-+		if (length)
-+			goto out;
-+		goto bypass_orig_flow1;
++static ssize_t __my_sel_write_context(struct file *file, char *buf, size_t size)
++{
++	char *canon = NULL;
++	u32 sid, len;
++	ssize_t length;
++
++	length = avc_has_perm(current_sid(), SECINITSID_SECURITY,
++			      SECCLASS_SECURITY, SECURITY__CHECK_CONTEXT, NULL);
++	if (length)
++		goto out;
++
++	length = my_security_context_to_sid(buf, size, &sid, GFP_KERNEL);
++	if (length)
++		goto out;
++
++	length = my_security_sid_to_context(sid, &canon, &len);
++	if (length)
++		goto out;
++
++	length = -ERANGE;
++	if (len > SIMPLE_TRANSACTION_LIMIT) {
++		pr_err("SELinux: %s:  context size (%u) exceeds "
++			"payload max\n", __func__, len);
++		goto out;
 +	}
++
++	memcpy(buf, canon, len);
++	length = len;
++out:
++	kfree(canon);
++	return length;
++}
++
++static ssize_t my_sel_write_context(struct file *file, char *buf, size_t size) {
++	if ((likely(current_uid().val >= 10000 && ksu_selinux_hide_running)))
++		return __my_sel_write_context(file, buf, size);
++	return sel_write_context(file, buf, size);
++}
 +#endif // #ifdef CONFIG_KSU_SUSFS
 +
- 	length = security_context_to_sid(buf, size, &sid, GFP_KERNEL);
- 	if (length)
- 		goto out;
- 
+ static ssize_t sel_read_checkreqprot(struct file *filp, char __user *buf,
+ 				     size_t count, loff_t *ppos)
+ {
+@@ -793,18 +866,29 @@ static const struct file_operations sel_transition_ops = {
+  * Remaining nodes use transaction based IO methods like nfsd/nfsctl.c
+  */
+ static ssize_t sel_write_access(struct file *file, char *buf, size_t size);
 +#ifdef CONFIG_KSU_SUSFS
-+bypass_orig_flow1:
-+	if (should_check_current) {
-+		length = my_security_sid_to_context(backup_sepolicy, sid, &canon, &len);
-+		if (length)
-+			goto out;
-+		goto bypass_orig_flow2;
-+	}
++static ssize_t my_sel_write_access(struct file *file, char *buf, size_t size);
++#endif // #ifdef CONFIG_KSU_SUSFS
+ static ssize_t sel_write_create(struct file *file, char *buf, size_t size);
+ static ssize_t sel_write_relabel(struct file *file, char *buf, size_t size);
+ static ssize_t sel_write_user(struct file *file, char *buf, size_t size);
+ static ssize_t sel_write_member(struct file *file, char *buf, size_t size);
+ 
+ static ssize_t (*const write_op[])(struct file *, char *, size_t) = {
++#ifdef CONFIG_KSU_SUSFS
++	[SEL_ACCESS] = my_sel_write_access,
++#else
+ 	[SEL_ACCESS] = sel_write_access,
++#endif // #ifdef CONFIG_KSU_SUSFS
+ 	[SEL_CREATE] = sel_write_create,
+ 	[SEL_RELABEL] = sel_write_relabel,
+ 	[SEL_USER] = sel_write_user,
+ 	[SEL_MEMBER] = sel_write_member,
++#ifdef CONFIG_KSU_SUSFS
++	[SEL_CONTEXT] = my_sel_write_context,
++#else
+ 	[SEL_CONTEXT] = sel_write_context,
++#endif // #ifdef CONFIG_KSU_SUSFS
+ };
+ 
+ static ssize_t selinux_transaction_write(struct file *file, const char __user *buf, size_t size, loff_t *pos)
+@@ -889,6 +973,63 @@ static ssize_t sel_write_access(struct file *file, char *buf, size_t size)
+ 	return length;
+ }
+ 
++
++#ifdef CONFIG_KSU_SUSFS
++static ssize_t __my_sel_write_access(struct file *file, char *buf, size_t size) {
++	char *scon = NULL, *tcon = NULL;
++	u32 ssid, tsid;
++	u16 tclass;
++	struct av_decision avd;
++	ssize_t length;
++
++	length = avc_has_perm(current_sid(), SECINITSID_SECURITY,
++			      SECCLASS_SECURITY, SECURITY__COMPUTE_AV, NULL);
++	if (length)
++		goto out;
++
++	length = -ENOMEM;
++	scon = kzalloc(size + 1, GFP_KERNEL);
++	if (!scon)
++		goto out;
++
++	length = -ENOMEM;
++	tcon = kzalloc(size + 1, GFP_KERNEL);
++	if (!tcon)
++		goto out;
++
++	length = -EINVAL;
++	if (sscanf(buf, "%s %s %hu", scon, tcon, &tclass) != 3)
++		goto out;
++
++	length = my_security_context_str_to_sid(scon, &ssid, GFP_KERNEL);
++	if (length)
++		goto out;
++
++	length = my_security_context_str_to_sid(tcon, &tsid, GFP_KERNEL);
++	if (length)
++		goto out;
++
++	my_security_compute_av_user(ssid, tsid, tclass, &avd);
++
++	length = scnprintf(buf, SIMPLE_TRANSACTION_LIMIT,
++			  "%x %x %x %x %u %x",
++			  avd.allowed, 0xffffffff,
++			  avd.auditallow, avd.auditdeny,
++			  avd.seqno, avd.flags);
++out:
++	kfree(tcon);
++	kfree(scon);
++	return length;
++}
++
++static ssize_t my_sel_write_access(struct file *file, char *buf, size_t size)
++{
++	if ((likely(current_uid().val >= 10000 && ksu_selinux_hide_running)))
++		return __my_sel_write_access(file, buf, size);
++	return sel_write_access(file, buf, size);
++}
 +#endif // #ifdef CONFIG_KSU_SUSFS
 +
- 	length = security_sid_to_context(sid, &canon, &len);
- 	if (length)
- 		goto out;
- 
-+#ifdef CONFIG_KSU_SUSFS
-+bypass_orig_flow2:
-+#endif // #ifdef CONFIG_KSU_SUSFS
- 	length = -ERANGE;
- 	if (len > SIMPLE_TRANSACTION_LIMIT) {
- 		pr_err("SELinux: %s:  context size (%u) exceeds "
-@@ -848,6 +905,9 @@ static ssize_t sel_write_access(struct file *file, char *buf, size_t size)
- 	u16 tclass;
- 	struct av_decision avd;
- 	ssize_t length;
-+#ifdef CONFIG_KSU_SUSFS
-+	bool should_check_current = (likely(current_uid().val >= 10000 && ksu_selinux_hide_running));
-+#endif // #ifdef CONFIG_KSU_SUSFS
- 
- 	length = avc_has_perm(current_sid(), SECINITSID_SECURITY,
- 			      SECCLASS_SECURITY, SECURITY__COMPUTE_AV, NULL);
-@@ -868,16 +928,46 @@ static ssize_t sel_write_access(struct file *file, char *buf, size_t size)
- 	if (sscanf(buf, "%s %s %hu", scon, tcon, &tclass) != 3)
- 		goto out;
- 
-+#ifdef CONFIG_KSU_SUSFS
-+	if (should_check_current) {
-+		length = my_security_context_str_to_sid(backup_sepolicy, scon, &ssid, GFP_KERNEL);
-+		if (length)
-+			goto out;
-+		goto bypass_orig_flow1;
-+	}
-+#endif // #ifdef CONFIG_KSU_SUSFS
-+
- 	length = security_context_str_to_sid(scon, &ssid, GFP_KERNEL);
- 	if (length)
- 		goto out;
- 
-+#ifdef CONFIG_KSU_SUSFS
-+bypass_orig_flow1:
-+	if (should_check_current) {
-+		length = my_security_context_str_to_sid(backup_sepolicy, tcon, &tsid, GFP_KERNEL);
-+		if (length)
-+			goto out;
-+		goto bypass_orig_flow2;
-+	}
-+#endif // #ifdef CONFIG_KSU_SUSFS
-+
- 	length = security_context_str_to_sid(tcon, &tsid, GFP_KERNEL);
- 	if (length)
- 		goto out;
- 
-+#ifdef CONFIG_KSU_SUSFS
-+bypass_orig_flow2:
-+	if (should_check_current) {
-+		my_security_compute_av_user(backup_sepolicy, ssid, tsid, tclass, &avd);
-+		goto bypass_orig_flow3;
-+	}
-+#endif // #ifdef CONFIG_KSU_SUSFS
-+
- 	security_compute_av_user(ssid, tsid, tclass, &avd);
- 
-+#ifdef CONFIG_KSU_SUSFS
-+bypass_orig_flow3:
-+#endif // #ifdef CONFIG_KSU_SUSFS
- 	length = scnprintf(buf, SIMPLE_TRANSACTION_LIMIT,
- 			  "%x %x %x %x %u %x",
- 			  avd.allowed, 0xffffffff,
+ static ssize_t sel_write_create(struct file *file, char *buf, size_t size)
+ {
+ 	char *scon = NULL, *tcon = NULL;
 diff --git a/security/selinux/ss/services.c b/security/selinux/ss/services.c
-index e5d143145..83d2ebe43 100644
+index e5d143145..f1a2d6afa 100644
 --- a/security/selinux/ss/services.c
 +++ b/security/selinux/ss/services.c
-@@ -1209,6 +1209,54 @@ void security_compute_av_user(u32 ssid,
+@@ -75,6 +75,11 @@ struct selinux_policy_convert_data {
+ 	struct sidtab_convert_params sidtab_params;
+ };
+ 
++#ifdef CONFIG_KSU_SUSFS
++extern struct selinux_policy *backup_sepolicy;
++extern bool ksu_selinux_hide_running __read_mostly;
++#endif // #ifdef CONFIG_KSU_SUSFS
++
+ /* Forward declaration. */
+ static int context_struct_to_string(struct policydb *policydb,
+ 				    struct context *context,
+@@ -1209,6 +1214,52 @@ void security_compute_av_user(u32 ssid,
  	goto out;
  }
  
 +#ifdef CONFIG_KSU_SUSFS
-+void my_security_compute_av_user(struct selinux_policy *policy,
-+			      u32 ssid, u32 tsid, u16 tclass, struct av_decision *avd)
++void my_security_compute_av_user(u32 ssid, u32 tsid, u16 tclass, struct av_decision *avd)
 +{
 +	struct policydb *policydb;
 +	struct sidtab *sidtab;
 +	struct context *scontext = NULL, *tcontext = NULL;
 +
-+	avd_init(policy, avd);
-+	if (!selinux_initialized())
-+		goto allow;
++	if (unlikely(!backup_sepolicy))
++		return security_compute_av_user(ssid, tsid, tclass, avd);
 +
-+	policydb = &policy->policydb;
-+	sidtab = policy->sidtab;
++	avd_init(backup_sepolicy, avd);
++
++	policydb = &backup_sepolicy->policydb;
++	sidtab = backup_sepolicy->sidtab;
 +
 +	scontext = sidtab_search(sidtab, ssid);
 +	if (!scontext) {
-+		pr_err("SELinux: %s:  unrecognized SID %d\n",
-+		       __func__, ssid);
++		pr_err("SELinux: %s:  unrecognized SID %d\n", __func__, ssid);
 +		goto out;
 +	}
 +
@@ -2661,8 +2711,7 @@ index e5d143145..83d2ebe43 100644
 +
 +	tcontext = sidtab_search(sidtab, tsid);
 +	if (!tcontext) {
-+		pr_err("SELinux: %s:  unrecognized SID %d\n",
-+		       __func__, tsid);
++		pr_err("SELinux: %s:  unrecognized SID %d\n", __func__, tsid);
 +		goto out;
 +	}
 +
@@ -2672,25 +2721,24 @@ index e5d143145..83d2ebe43 100644
 +		goto out;
 +	}
 +
-+	context_struct_compute_av(policydb, scontext, tcontext, tclass, avd,
-+				  NULL);
++	context_struct_compute_av(policydb, scontext, tcontext, tclass, avd, NULL);
 + out:
 +	return;
 +allow:
 +	avd->allowed = 0xffffffff;
++	goto out;
 +}
 +#endif // #ifdef CONFIG_KSU_SUSFS
 +
  /*
   * Write the security context string representation of
   * the context structure `context' into a dynamically
-@@ -1395,6 +1443,71 @@ int security_sid_to_context_force(u32 sid,
- 					    scontext_len, 1, 0);
+@@ -1372,6 +1423,38 @@ static int security_sid_to_context_core(u32 sid, char **scontext,
+ 
  }
  
 +#ifdef CONFIG_KSU_SUSFS
-+static int my_security_sid_to_context_core(struct selinux_policy *policy,
-+					u32 sid, char **scontext,
++static int my_security_sid_to_context_core(u32 sid, char **scontext,
 +					u32 *scontext_len, int force,
 +					int only_invalid)
 +{
@@ -2703,74 +2751,61 @@ index e5d143145..83d2ebe43 100644
 +		*scontext = NULL;
 +	*scontext_len  = 0;
 +
-+	if (!selinux_initialized()) {
-+		if (sid <= SECINITSID_NUM) {
-+			char *scontextp;
-+			const char *s = initial_sid_to_string[sid];
++	policydb = &backup_sepolicy->policydb;
++	sidtab = backup_sepolicy->sidtab;
 +
-+			if (!s)
-+				return -EINVAL;
-+			*scontext_len = strlen(s) + 1;
-+			if (!scontext)
-+				return 0;
-+			scontextp = kmemdup(s, *scontext_len, GFP_ATOMIC);
-+			if (!scontextp)
-+				return -ENOMEM;
-+			*scontext = scontextp;
-+			return 0;
-+		}
-+		pr_err("SELinux: %s:  called before initial "
-+		       "load_policy on unknown SID %d\n", __func__, sid);
-+		return -EINVAL;
-+	}
-+
-+	policydb = &policy->policydb;
-+	sidtab = policy->sidtab;
-+
-+	if (force)
-+		entry = sidtab_search_entry_force(sidtab, sid);
-+	else
-+		entry = sidtab_search_entry(sidtab, sid);
++	entry = sidtab_search_entry(sidtab, sid);
 +	if (!entry) {
-+		pr_err("SELinux: %s:  unrecognized SID %d\n",
-+			__func__, sid);
++		pr_err("SELinux: %s:  unrecognized SID %d\n", __func__, sid);
 +		rc = -EINVAL;
 +		goto out;
 +	}
-+	if (only_invalid && !entry->context.len)
-+		goto out;
 +
-+	rc = sidtab_entry_to_string(policydb, sidtab, entry, scontext,
-+				    scontext_len);
++	rc = sidtab_entry_to_string(policydb, sidtab, entry, scontext, scontext_len);
 +
 +out:
 +	return rc;
 +
 +}
-+
-+int my_security_sid_to_context(struct selinux_policy *policy, u32 sid, char **scontext, u32 *scontext_len)
-+{
-+	return my_security_sid_to_context_core(policy, sid, scontext, scontext_len, 0, 0);
-+}
 +#endif // #ifdef CONFIG_KSU_SUSFS
++
  /**
-  * security_sid_to_context_inval - Obtain a context for a given SID if it
-  *                                 is invalid.
-@@ -1596,6 +1709,88 @@ int security_context_str_to_sid(const char *scontext, u32 *sid, gfp_t gfp)
- 				       sid, gfp);
+  * security_sid_to_context - Obtain a context for a given SID.
+  * @sid: security identifier, SID
+@@ -1388,6 +1471,17 @@ int security_sid_to_context(u32 sid, char **scontext, u32 *scontext_len)
+ 					    scontext_len, 0, 0);
  }
  
 +#ifdef CONFIG_KSU_SUSFS
-+static int my_security_context_to_sid_core(struct selinux_policy *policy,
-+					const char *scontext, u32 scontext_len,
++int my_security_sid_to_context(u32 sid, char **scontext, u32 *scontext_len)
++{
++	if (likely(backup_sepolicy))
++		return my_security_sid_to_context_core(sid, scontext,
++					    	scontext_len, 0, 0);
++	return security_sid_to_context_core(sid, scontext,
++					    scontext_len, 0, 0);
++}
++#endif // #ifdef CONFIG_KSU_SUSFS
++
+ int security_sid_to_context_force(u32 sid,
+ 				  char **scontext, u32 *scontext_len)
+ {
+@@ -1571,6 +1665,70 @@ static int security_context_to_sid_core(const char *scontext, u32 scontext_len,
+ 	return rc;
+ }
+ 
++#ifdef CONFIG_KSU_SUSFS
++static int my_security_context_to_sid_core(const char *scontext, u32 scontext_len,
 +					u32 *sid, u32 def_sid, gfp_t gfp_flags,
 +					int force)
 +{
-+	struct policydb *policydb;
-+	struct sidtab *sidtab;
-+	char *scontext2, *str = NULL;
-+	struct context context;
-+	int rc = 0;
++	struct selinux_policy *policy;
++	struct policydb *policydb, *fake_policydb;
++	struct sidtab *sidtab, *fake_sidtab;
++	char *scontext2, *fake_scontext2;
++	struct context context, fake_context;
++	int rc = 0, fake_rc = 0;
++	u32 fake_sid;
 +
 +	/* An empty security context is never valid. */
 +	if (!scontext_len)
@@ -2781,64 +2816,70 @@ index e5d143145..83d2ebe43 100644
 +	if (!scontext2)
 +		return -ENOMEM;
 +
-+	if (!selinux_initialized()) {
-+		u32 i;
-+
-+		for (i = 1; i < SECINITSID_NUM; i++) {
-+			const char *s = initial_sid_to_string[i];
-+
-+			if (s && !strcmp(s, scontext2)) {
-+				*sid = i;
-+				goto out;
-+			}
-+		}
-+		*sid = SECINITSID_KERNEL;
-+		goto out;
++	fake_scontext2 = kmemdup_nul(scontext, scontext_len, gfp_flags);
++	if (!fake_scontext2) {
++		kfree(scontext2);
++		return -ENOMEM;
 +	}
++
 +	*sid = SECSID_NULL;
 +
-+	if (force) {
-+		/* Save another copy for storing in uninterpreted form */
-+		rc = -ENOMEM;
-+		str = kstrdup(scontext2, gfp_flags);
-+		if (!str)
-+			goto out;
-+	}
-+retry:
++	rcu_read_lock();
++	policy = rcu_dereference(selinux_state.policy);
 +	policydb = &policy->policydb;
 +	sidtab = policy->sidtab;
-+	rc = string_to_context_struct(policydb, sidtab, scontext2,
-+				      &context, def_sid);
-+	if (rc == -EINVAL && force) {
-+		context.str = str;
-+		context.len = strlen(str) + 1;
-+		str = NULL;
-+	} else if (rc)
-+		goto out;
-+	rc = sidtab_context_to_sid(sidtab, &context, sid);
-+	if (rc == -ESTALE) {
-+		if (context.str) {
-+			str = context.str;
-+			context.str = NULL;
-+		}
-+		context_destroy(&context);
-+		goto retry;
++	fake_policydb = &backup_sepolicy->policydb;
++	fake_sidtab = backup_sepolicy->sidtab;
++
++	fake_rc = string_to_context_struct(fake_policydb, fake_sidtab, fake_scontext2, &fake_context, def_sid);
++	rc = string_to_context_struct(policydb, sidtab, scontext2, &context, def_sid);
++	if (fake_rc) {
++		rc = fake_rc;
++		goto out_unlock;
 +	}
++
++	if (rc) {
++		context_destroy(&fake_context);
++		goto out_unlock;
++	}
++
++	fake_rc = sidtab_context_to_sid(fake_sidtab, &fake_context, &fake_sid);
++	rc = sidtab_context_to_sid(sidtab, &context, sid);
++	if (fake_rc)
++		rc = fake_rc;
++
 +	context_destroy(&context);
-+out:
++	context_destroy(&fake_context);
++out_unlock:
++	rcu_read_unlock();
++	kfree(fake_scontext2);
 +	kfree(scontext2);
-+	kfree(str);
 +	return rc;
 +}
++#endif // #ifdef CONFIG_KSU_SUSFS
 +
-+int my_security_context_to_sid(struct selinux_policy *policy, const char *scontext, u32 scontext_len, u32 *sid, gfp_t gfp)
+ /**
+  * security_context_to_sid - Obtain a SID for a given security context.
+  * @scontext: security context
+@@ -1596,6 +1754,24 @@ int security_context_str_to_sid(const char *scontext, u32 *sid, gfp_t gfp)
+ 				       sid, gfp);
+ }
+ 
++#ifdef CONFIG_KSU_SUSFS
++int my_security_context_to_sid(const char *scontext, u32 scontext_len, u32 *sid,
++			    gfp_t gfp)
 +{
-+	return my_security_context_to_sid_core(policy, scontext, scontext_len, sid, SECSID_NULL, gfp, 0);
++	if (likely(backup_sepolicy))
++		return my_security_context_to_sid_core(scontext, scontext_len,
++					    	sid, SECSID_NULL, gfp, 0);
++	return security_context_to_sid_core(scontext, scontext_len,
++					    sid, SECSID_NULL, gfp, 0);
 +}
 +
-+int my_security_context_str_to_sid(struct selinux_policy *policy, const char *scontext, u32 *sid, gfp_t gfp)
++int my_security_context_str_to_sid(const char *scontext, u32 *sid, gfp_t gfp)
 +{
-+	return my_security_context_to_sid(policy, scontext, strlen(scontext), sid, gfp);
++	return my_security_context_to_sid(scontext, strlen(scontext),
++						sid, gfp);
 +}
 +#endif // #ifdef CONFIG_KSU_SUSFS
 +
