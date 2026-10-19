@@ -35,7 +35,7 @@ index ee5af0ba..faaa55eb 100644
  
  ccflags-y += -I$(srctree)/security/selinux -I$(srctree)/security/selinux/include
 diff --git a/kernel/Kconfig b/kernel/Kconfig
-index 88e22811..cc4b966b 100644
+index 88e22811..fcb0e664 100644
 --- a/kernel/Kconfig
 +++ b/kernel/Kconfig
 @@ -2,7 +2,6 @@ menu "KernelSU"
@@ -53,6 +53,7 @@ index 88e22811..cc4b966b 100644
 -config KSU_X86_PATCH_SYSCALL_DISPATCHER
 -	bool "Dynamically patch x64's hardened syscall dispatcher to support syscall hooks"
 -	depends on KSU && X86_64
+-	default n
 +menu "KernelSU - SUSFS"
 +config KSU_SUSFS
 +	bool "KernelSU addon - SUSFS"
@@ -86,7 +87,7 @@ index 88e22811..cc4b966b 100644
 +config KSU_SUSFS_SUS_KSTAT
 +	bool "Enable to spoof suspicious kstat"
 +	depends on KSU_SUSFS
-+	default n
++	default y
 +	help
 +	  - Allow spoofing the kstat of user-defined file/directory.
 +	  - Effective on all processes with (uid % 100000) >= 10000.
@@ -118,17 +119,17 @@ index 88e22811..cc4b966b 100644
 +	bool "Enable to spoof /proc/bootconfig (gki) or /proc/cmdline (non-gki)"
 +	depends on KSU_SUSFS
 +	default y
-+	help
+ 	help
+-	  Dynamically patch x64's hardened syscall dispatcher to support syscall hooks. This is a
+-	  replacement for a kernel source code patch, and is useful for x86_64 LKM mode.
 +	  - Spoof the output of /proc/bootconfig (gki) or /proc/cmdline (non-gki) with a user-defined file.
 +	  - Effective on all processes.
 +
 +config KSU_SUSFS_OPEN_REDIRECT
 +	bool "Enable to redirect a path to be opened with another path"
 +	depends on KSU_SUSFS
- 	default n
- 	help
--	  Dynamically patch x64's hardened syscall dispatcher to support syscall hooks. This is a
--	  replacement for a kernel source code patch, and is useful for x86_64 LKM mode.
++	default y
++	help
 +	  - Allow redirecting a target path to be opened with another user-defined path.
 +	  - Both target path and redirected path must be existed before they can be added to the kernel.
 +	  - Users have to take care of the selinux permission of both target path and redirected path by themselves.
@@ -2065,7 +2066,7 @@ index 09384def..70c67562 100644
 +                             struct user_arg_ptr *envp, int *flags);
  #endif
 diff --git a/kernel/runtime/ksud_integration.c b/kernel/runtime/ksud_integration.c
-index 92faca8b..83488279 100644
+index 1a7ba9ff..75265336 100644
 --- a/kernel/runtime/ksud_integration.c
 +++ b/kernel/runtime/ksud_integration.c
 @@ -11,7 +11,6 @@
@@ -2231,7 +2232,7 @@ index 92faca8b..83488279 100644
  }
  
  static ssize_t (*orig_read)(struct file *, char __user *, size_t, loff_t *);
-@@ -446,13 +426,16 @@ static void ksu_install_rc_hook(struct file *file)
+@@ -442,13 +422,16 @@ static void ksu_install_rc_hook(struct file *file)
          return;
      }
      rc_hooked = true;
@@ -2250,7 +2251,7 @@ index 92faca8b..83488279 100644
      pr_info("read init.rc, comm: %s, rc_count: %zu, module_rc: %zu\n", current->comm, ksu_rc_len, module_rc_len);
  
      // Now we need to proxy the read and modify the result!
-@@ -471,7 +454,7 @@ static void ksu_install_rc_hook(struct file *file)
+@@ -467,7 +450,7 @@ static void ksu_install_rc_hook(struct file *file)
      file->f_op = &fops_proxy;
  }
  
@@ -2259,7 +2260,7 @@ index 92faca8b..83488279 100644
  {
      struct file *file = fget(fd);
      if (!file) {
-@@ -494,11 +477,13 @@ int ksu_handle_input_handle_event(unsigned int *type, unsigned int *code, int *v
+@@ -490,11 +473,13 @@ int ksu_handle_input_handle_event(unsigned int *type, unsigned int *code, int *v
          int val = *value;
          pr_info("KEY_VOLUMEDOWN val: %d\n", val);
          if (val) {
@@ -2276,7 +2277,7 @@ index 92faca8b..83488279 100644
          }
      }
  
-@@ -513,12 +498,11 @@ bool ksu_is_safe_mode()
+@@ -509,12 +494,11 @@ bool ksu_is_safe_mode()
          return true;
      }
  
@@ -2293,7 +2294,7 @@ index 92faca8b..83488279 100644
  
      pr_info("volumedown_pressed_count: %d\n", volumedown_pressed_count);
      if (is_volumedown_enough(volumedown_pressed_count)) {
-@@ -531,66 +515,13 @@ bool ksu_is_safe_mode()
+@@ -527,66 +511,13 @@ bool ksu_is_safe_mode()
      return false;
  }
  
@@ -2364,7 +2365,7 @@ index 92faca8b..83488279 100644
      if (file) {
          if (is_init_rc(file)) {
              pr_info("stat init.rc");
-@@ -600,85 +531,20 @@ static long ksu_sys_fstat(const struct pt_regs *regs)
+@@ -596,85 +527,20 @@ static long ksu_sys_fstat(const struct pt_regs *regs)
          fput(file);
      }
  
