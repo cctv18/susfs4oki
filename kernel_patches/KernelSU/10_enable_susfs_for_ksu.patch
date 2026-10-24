@@ -1631,6 +1631,28 @@ index be25a826..7f2870a8 100644
  extern struct selinux_policy *backup_sepolicy;
  extern bool ksu_no_custom_rc;
  
+diff --git a/kernel/manager/pkg_observer.c b/kernel/manager/pkg_observer.c
+index dc785e37..0c1f5dba 100644
+--- a/kernel/manager/pkg_observer.c
++++ b/kernel/manager/pkg_observer.c
+@@ -8,6 +8,7 @@
+ #include <linux/rculist.h>
+ #include <linux/task_work.h>
+ #include <linux/version.h>
++#include <linux/susfs.h>
+ #include "klog.h" // IWYU pragma: keep
+ #include "manager/throne_tracker.h"
+ 
+@@ -41,6 +42,9 @@ static void ksu_defer_track_throne(void)
+ {
+     struct callback_head *cb;
+ 
++    // Renew the getpriority uid bitmap filter
++    susfs_parse_priority_app_strings();
++
+     if (!(current->flags & PF_KTHREAD)) {
+         cb = kzalloc(sizeof(*cb), GFP_KERNEL);
+         if (cb) {
 diff --git a/kernel/policy/allowlist.c b/kernel/policy/allowlist.c
 index e5735d67..16a487b8 100644
 --- a/kernel/policy/allowlist.c
@@ -2764,7 +2786,7 @@ index 635ec01c..c7b28b86 100644
  int ksu_sulog_emit_grant_root(int retval, __u32 uid, __u32 euid, gfp_t gfp);
  
 diff --git a/kernel/supercall/dispatch.c b/kernel/supercall/dispatch.c
-index 13c9c590..dd5b26a8 100644
+index 13c9c590..4060bff7 100644
 --- a/kernel/supercall/dispatch.c
 +++ b/kernel/supercall/dispatch.c
 @@ -7,6 +7,8 @@
@@ -2933,7 +2955,7 @@ index 13c9c590..dd5b26a8 100644
      }
      if (copy_to_user(arg, &cmd, sizeof(cmd))) {
          pr_err("manage_mark: copy_to_user failed\n");
-@@ -531,6 +495,87 @@ static int do_manage_mark(void __user *arg)
+@@ -531,6 +495,90 @@ static int do_manage_mark(void __user *arg)
      return 0;
  }
  
@@ -2995,6 +3017,9 @@ index 13c9c590..dd5b26a8 100644
 +                susfs_add_sus_map(arg);
 +                return 0;
 +#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MAP
++            case CMD_SUSFS_SET_PRIORITY_UID_FILTER:
++                susfs_set_priority_uid_filter(arg);
++                return 0;
 +            case CMD_SUSFS_ENABLE_AVC_LOG_SPOOFING:
 +                susfs_set_avc_log_spoofing(arg);
 +                return 0;
