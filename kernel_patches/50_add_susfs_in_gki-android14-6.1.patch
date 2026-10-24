@@ -2542,7 +2542,7 @@ index ad079e552..a503cf07d 100644
  	LSM_HOOK_INIT(secctx_to_secid, selinux_secctx_to_secid),
  	LSM_HOOK_INIT(release_secctx, selinux_release_secctx),
 diff --git a/security/selinux/selinuxfs.c b/security/selinux/selinuxfs.c
-index 755325a94..5f7d5ce86 100644
+index 755325a94..cc8e57887 100644
 --- a/security/selinux/selinuxfs.c
 +++ b/security/selinux/selinuxfs.c
 @@ -43,6 +43,16 @@
@@ -2562,24 +2562,20 @@ index 755325a94..5f7d5ce86 100644
  enum sel_inos {
  	SEL_ROOT_INO = 2,
  	SEL_LOAD,	/* load policy */
-@@ -226,12 +236,31 @@ static int sel_open_handle_status(struct inode *inode, struct file *filp)
- {
+@@ -227,11 +237,27 @@ static int sel_open_handle_status(struct inode *inode, struct file *filp)
  	struct selinux_fs_info *fsi = file_inode(filp)->i_sb->s_fs_info;
  	struct page    *status = selinux_kernel_status_page(fsi->state);
+ 
 +#ifdef CONFIG_KSU_SUSFS
-+	void *data;
-+
 +	if (likely(current_uid().val >= 10000 && ksu_selinux_hide_running)) {
-+		mutex_lock(&selinux_state.status_lock);
-+		data = fake_status;
-+		mutex_unlock(&selinux_state.status_lock);
++		void *data = fake_status;
 +		if (data) {
 +			filp->private_data = data;
 +			return 0;
 +		}
 +	}
 +#endif // #ifdef CONFIG_KSU_SUSFS
- 
++
  	if (!status)
  		return -ENOMEM;
  
@@ -2594,7 +2590,7 @@ index 755325a94..5f7d5ce86 100644
  	return 0;
  }
  
-@@ -712,6 +741,14 @@ static ssize_t sel_write_context(struct file *file, char *buf, size_t size)
+@@ -712,6 +738,14 @@ static ssize_t sel_write_context(struct file *file, char *buf, size_t size)
  	return length;
  }
  
@@ -2609,7 +2605,7 @@ index 755325a94..5f7d5ce86 100644
  static ssize_t sel_read_checkreqprot(struct file *filp, char __user *buf,
  				     size_t count, loff_t *ppos)
  {
-@@ -862,18 +899,29 @@ static const struct file_operations sel_transition_ops = {
+@@ -862,18 +896,29 @@ static const struct file_operations sel_transition_ops = {
   * Remaining nodes use transaction based IO methods like nfsd/nfsctl.c
   */
  static ssize_t sel_write_access(struct file *file, char *buf, size_t size);
@@ -2639,7 +2635,7 @@ index 755325a94..5f7d5ce86 100644
  };
  
  static ssize_t selinux_transaction_write(struct file *file, const char __user *buf, size_t size, loff_t *pos)
-@@ -961,6 +1009,16 @@ static ssize_t sel_write_access(struct file *file, char *buf, size_t size)
+@@ -961,6 +1006,16 @@ static ssize_t sel_write_access(struct file *file, char *buf, size_t size)
  	return length;
  }
  
