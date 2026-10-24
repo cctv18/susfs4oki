@@ -590,7 +590,7 @@ index 7e337abf..8b6e0b3c 100644
      pr_info("handle umount for uid: %d, pid: %d\n", new_uid, current->pid);
  
 diff --git a/kernel/feature/selinux_hide.c b/kernel/feature/selinux_hide.c
-index 459f99f9..6cd0659d 100644
+index 8f23888b..6cd0659d 100644
 --- a/kernel/feature/selinux_hide.c
 +++ b/kernel/feature/selinux_hide.c
 @@ -1,9 +1,5 @@
@@ -759,7 +759,7 @@ index 459f99f9..6cd0659d 100644
  
      fake_status = new_page;
      pr_info("initialize_fake_status initialized: sequence=%d, policyload=%d, enforcing=%d\n", new_status->sequence,
-@@ -361,120 +309,32 @@ out:
+@@ -361,117 +309,32 @@ out:
      mutex_unlock(&selinux_state.status_lock);
  }
  
@@ -769,10 +769,7 @@ index 459f99f9..6cd0659d 100644
 +void ksu_selinux_hide_handle_second_stage()
  {
 -    if (likely(current_uid().val >= 10000 && ksu_selinux_hide_enabled)) {
--        void *data;
--        mutex_lock(&selinux_state.status_lock);
--        data = fake_status;
--        mutex_unlock(&selinux_state.status_lock);
+-        void *data = fake_status;
 -        if (data) {
 -            filp->private_data = data;
 -            return 0;
@@ -893,7 +890,7 @@ index 459f99f9..6cd0659d 100644
  }
  
  static int selinux_hide_feature_get(u64 *value)
-@@ -499,10 +359,11 @@ static int selinux_hide_feature_set(u64 value)
+@@ -496,10 +359,11 @@ static int selinux_hide_feature_set(u64 value)
          }
      } else {
          if (ksu_selinux_hide_running) {
@@ -906,7 +903,7 @@ index 459f99f9..6cd0659d 100644
      mutex_unlock(&selinux_hide_mutex);
      return ret;
  }
-@@ -514,65 +375,18 @@ static const struct ksu_feature_handler selinux_hide_handler = {
+@@ -511,65 +375,18 @@ static const struct ksu_feature_handler selinux_hide_handler = {
      .set_handler = selinux_hide_feature_set,
  };
  
@@ -973,7 +970,7 @@ index 459f99f9..6cd0659d 100644
          ksu_selinux_hide_running = false;
      }
      mutex_unlock(&selinux_hide_mutex);
-@@ -1254,4 +1068,4 @@ out:
+@@ -1251,4 +1068,4 @@ out:
  allow:
      avd->allowed = 0xffffffff;
      goto out;
