@@ -590,7 +590,7 @@ index 7e337abf..8b6e0b3c 100644
      pr_info("handle umount for uid: %d, pid: %d\n", new_uid, current->pid);
  
 diff --git a/kernel/feature/selinux_hide.c b/kernel/feature/selinux_hide.c
-index 8f23888b..6cd0659d 100644
+index 2a41b805..ede875e5 100644
 --- a/kernel/feature/selinux_hide.c
 +++ b/kernel/feature/selinux_hide.c
 @@ -1,9 +1,5 @@
@@ -970,7 +970,7 @@ index 8f23888b..6cd0659d 100644
          ksu_selinux_hide_running = false;
      }
      mutex_unlock(&selinux_hide_mutex);
-@@ -1251,4 +1068,4 @@ out:
+@@ -1265,4 +1082,4 @@ out:
  allow:
      avd->allowed = 0xffffffff;
      goto out;
@@ -1629,7 +1629,7 @@ index be25a826..7f2870a8 100644
  extern bool ksu_no_custom_rc;
  
 diff --git a/kernel/manager/pkg_observer.c b/kernel/manager/pkg_observer.c
-index dc785e37..dbb9e399 100644
+index dc785e37..05850c84 100644
 --- a/kernel/manager/pkg_observer.c
 +++ b/kernel/manager/pkg_observer.c
 @@ -8,6 +8,7 @@
@@ -1644,7 +1644,7 @@ index dc785e37..dbb9e399 100644
      if (current->flags & PF_EXITING)
          return;
      track_throne(false);
-+    // Renew the getpriority uid bitmap filter
++    // Renew the priority uid bitmap filter
 +    susfs_parse_priority_app_strings();
  }
  
@@ -2485,10 +2485,10 @@ index 768b9a26..2595940b 100644
      mutex_unlock(&selinux_state.policy_mutex);
  }
 diff --git a/kernel/selinux/selinux.c b/kernel/selinux/selinux.c
-index e5dcc4d3..01d07eeb 100644
+index e5dcc4d3..72084b64 100644
 --- a/kernel/selinux/selinux.c
 +++ b/kernel/selinux/selinux.c
-@@ -234,3 +234,92 @@ void escape_to_root_for_adb_root(void)
+@@ -234,3 +234,93 @@ void escape_to_root_for_adb_root(void)
      }
      commit_creds(cred);
  }
@@ -2581,8 +2581,9 @@ index e5dcc4d3..01d07eeb 100644
 +    susfs_set_sid(KERNEL_INIT_DOMAIN, &susfs_init_sid);
 +    susfs_set_sid(KERNEL_PRIV_APP_DOMAIN, &susfs_priv_app_sid);
 +}
++
 diff --git a/kernel/selinux/selinux.h b/kernel/selinux/selinux.h
-index 158f9455..7048d71f 100644
+index 158f9455..90cc2ac0 100644
 --- a/kernel/selinux/selinux.h
 +++ b/kernel/selinux/selinux.h
 @@ -42,4 +42,13 @@ void escape_to_root_for_adb_root();
@@ -2597,8 +2598,45 @@ index 158f9455..7048d71f 100644
 +bool susfs_is_current_zygote_next_domain(void);
 +bool susfs_is_current_ksu_domain(void);
 +bool susfs_is_current_init_domain(void);
-+
++extern void susfs_add_sus_type_by_type_name(char *type_name);
  #endif
+diff --git a/kernel/selinux/sepolicy.c b/kernel/selinux/sepolicy.c
+index b00e5175..e2e59d1a 100644
+--- a/kernel/selinux/sepolicy.c
++++ b/kernel/selinux/sepolicy.c
+@@ -14,6 +14,11 @@
+ #include "klog.h" // IWYU pragma: keep
+ #include "ss/symtab.h"
+ 
++#ifdef CONFIG_KSU_SUSFS
++extern int susfs_add_sus_avd_allowed_by_type(u32 s_type, u32 t_type, u16 type, u32 orig_avd_allowed);
++extern int susfs_add_sus_type(const char *secctx, u32 type_value);
++#endif // #ifdef CONFIG_KSU_SUSFS
++
+ #define KSU_SUPPORT_ADD_TYPE
+ 
+ //////////////////////////////////////////////////////
+@@ -307,6 +312,10 @@ static bool add_rule_raw(struct policydb *db, struct type_datum *src, struct typ
+                 return false;
+         }
+ 
++#ifdef CONFIG_KSU_SUSFS
++        susfs_add_sus_avd_allowed_by_type(src->value, tgt->value, cls->value, node->datum.u.data);
++#endif // #ifdef CONFIG_KSU_SUSFS
++
+         if (invert) {
+             if (perm)
+                 node->datum.u.data &= ~(1U << (perm->value - 1));
+@@ -724,6 +733,9 @@ static bool add_type(struct policydb *db, const char *type_name, bool attr)
+         ebitmap_set_bit(&db->role_val_to_struct[i]->types, value - 1, 1);
+     }
+ 
++#ifdef CONFIG_KSU_SUSFS
++    susfs_add_sus_type(type_name, type->value);
++#endif // #ifdef CONFIG_KSU_SUSFS
+     return true;
+ }
+ 
 diff --git a/kernel/sulog/event.c b/kernel/sulog/event.c
 index 51d6fa84..3b61cb1d 100644
 --- a/kernel/sulog/event.c
