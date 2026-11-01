@@ -1,15 +1,15 @@
 
 diff --git a/block/ioprio.c b/block/ioprio.c
-index b5a942519..9cecf48f8 100644
+index b5a942519..16e3d6f97 100644
 --- a/block/ioprio.c
 +++ b/block/ioprio.c
 @@ -66,6 +66,10 @@ int ioprio_check_cap(int ioprio)
  	return 0;
  }
  
-+#ifdef CONFIG_KSU_SUSFS
++#ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
 +extern bool susfs_is_priority_uid_filtered(uid_t uid);
-+#endif // #ifdef CONFIG_KSU_SUSFS
++#endif // #ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
 +
  SYSCALL_DEFINE3(ioprio_set, int, which, int, who, int, ioprio)
  {
@@ -18,7 +18,7 @@ index b5a942519..9cecf48f8 100644
  			if (!who)
  				user = current_user();
  			else
-+#ifdef CONFIG_KSU_SUSFS
++#ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
 +			{
 +				if (current_uid().val >= 10000 && susfs_is_priority_uid_filtered(uid.val))
 +					break;
@@ -27,7 +27,7 @@ index b5a942519..9cecf48f8 100644
 +			}
 +#else
 +				user = find_user(uid);
-+#endif // #ifdef CONFIG_KSU_SUSFS
++#endif // #ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
  			if (!user)
  				break;
  
@@ -35,7 +35,7 @@ index b5a942519..9cecf48f8 100644
  			if (!who)
  				user = current_user();
  			else
-+#ifdef CONFIG_KSU_SUSFS
++#ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
 +			{
 +				if (current_uid().val >= 10000 && susfs_is_priority_uid_filtered(uid.val))
 +					break;
@@ -44,7 +44,7 @@ index b5a942519..9cecf48f8 100644
 +			}
 +#else
 +				user = find_user(uid);
-+#endif // #ifdef CONFIG_KSU_SUSFS
++#endif // #ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
  			if (!user)
  				break;
  
@@ -2383,16 +2383,16 @@ index 344ceaf5e..c2d1a782d 100644
  	if (!ns_capable(pid_ns->user_ns, CAP_SYS_BOOT))
  		return -EPERM;
 diff --git a/kernel/sys.c b/kernel/sys.c
-index c6b0141e4..7685343b4 100644
+index c6b0141e4..94b885c93 100644
 --- a/kernel/sys.c
 +++ b/kernel/sys.c
 @@ -217,6 +217,10 @@ static int set_one_prio(struct task_struct *p, int niceval, int error)
  	return error;
  }
  
-+#ifdef CONFIG_KSU_SUSFS
++#ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
 +extern bool susfs_is_priority_uid_filtered(uid_t uid);
-+#endif // #ifdef CONFIG_KSU_SUSFS
++#endif // #ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
 +
  SYSCALL_DEFINE3(setpriority, int, which, int, who, int, niceval)
  {
@@ -2401,10 +2401,10 @@ index c6b0141e4..7685343b4 100644
  		if (!who)
  			uid = cred->uid;
  		else if (!uid_eq(uid, cred->uid)) {
-+#ifdef CONFIG_KSU_SUSFS
++#ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
 +			if (cred->uid.val >= 10000 && susfs_is_priority_uid_filtered(uid.val))
 +				goto out_unlock;
-+#endif // #ifdef CONFIG_KSU_SUSFS
++#endif // #ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
  			user = find_user(uid);
  			if (!user)
  				goto out_unlock;	/* No processes for this user */
@@ -2412,10 +2412,10 @@ index c6b0141e4..7685343b4 100644
  		if (!who)
  			uid = cred->uid;
  		else if (!uid_eq(uid, cred->uid)) {
-+#ifdef CONFIG_KSU_SUSFS
++#ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
 +			if (cred->uid.val >= 10000 && susfs_is_priority_uid_filtered(uid.val))
 +				goto out_unlock;
-+#endif // #ifdef CONFIG_KSU_SUSFS
++#endif // #ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
  			user = find_user(uid);
  			if (!user)
  				goto out_unlock;	/* No processes for this user */
