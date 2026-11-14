@@ -2496,10 +2496,10 @@ index d93af9249..0f9e0f00c 100644
  	audit_log_format(ab, " tclass=%s", tclass);
  
 diff --git a/security/selinux/hooks.c b/security/selinux/hooks.c
-index ad079e552..544cdc95d 100644
+index ad079e552..4795a8a84 100644
 --- a/security/selinux/hooks.c
 +++ b/security/selinux/hooks.c
-@@ -105,6 +105,12 @@
+@@ -105,6 +105,15 @@
  #include "avc_ss.h"
  
  struct selinux_state selinux_state;
@@ -2508,11 +2508,72 @@ index ad079e552..544cdc95d 100644
 +extern int susfs_security_context_to_sid(struct selinux_state *state,
 +			    const char *scontext, u32 scontext_len, u32 *sid,
 +			    gfp_t gfp);
++extern int susfs_security_context_to_sid_force(struct selinux_state *state,
++				  const char *scontext, u32 scontext_len,
++				  u32 *sid);
 +#endif // #ifdef CONFIG_KSU_SUSFS
  
  /* SECMARK reference count */
  static atomic_t selinux_secmark_refcount = ATOMIC_INIT(0);
-@@ -6590,6 +6596,161 @@ static int selinux_setprocattr(const char *name, void *value, size_t size)
+@@ -3219,8 +3228,18 @@ static int selinux_inode_setxattr(struct user_namespace *mnt_userns,
+ 	if (rc)
+ 		return rc;
+ 
++#ifdef CONFIG_KSU_SUSFS
++	if ((likely(current_uid().val >= 10000 && ksu_selinux_hide_running))) {
++		rc = susfs_security_context_to_sid(&selinux_state, value, size, &newsid,
++				     GFP_KERNEL);
++		goto bypass_orig_flow1;
++	}
++#endif // #ifdef CONFIG_KSU_SUSFS
+ 	rc = security_context_to_sid(&selinux_state, value, size, &newsid,
+ 				     GFP_KERNEL);
++#ifdef CONFIG_KSU_SUSFS
++bypass_orig_flow1:
++#endif // #ifdef CONFIG_KSU_SUSFS
+ 	if (rc == -EINVAL) {
+ 		if (!has_cap_mac_admin(true)) {
+ 			struct audit_buffer *ab;
+@@ -3248,9 +3267,19 @@ static int selinux_inode_setxattr(struct user_namespace *mnt_userns,
+ 
+ 			return rc;
+ 		}
++#ifdef CONFIG_KSU_SUSFS
++		if ((likely(current_uid().val >= 10000 && ksu_selinux_hide_running))) {
++			rc = susfs_security_context_to_sid_force(&selinux_state, value,
++							size, &newsid);
++			goto bypass_orig_flow2;
++		}
++#endif // #ifdef CONFIG_KSU_SUSFS
+ 		rc = security_context_to_sid_force(&selinux_state, value,
+ 						   size, &newsid);
+ 	}
++#ifdef CONFIG_KSU_SUSFS
++bypass_orig_flow2:
++#endif // #ifdef CONFIG_KSU_SUSFS
+ 	if (rc)
+ 		return rc;
+ 
+@@ -3296,8 +3325,18 @@ static void selinux_inode_post_setxattr(struct dentry *dentry, const char *name,
+ 		return;
+ 	}
+ 
++#ifdef CONFIG_KSU_SUSFS
++		if ((likely(current_uid().val >= 10000 && ksu_selinux_hide_running))) {
++			rc = susfs_security_context_to_sid_force(&selinux_state, value, size,
++					   &newsid);
++			goto bypass_orig_flow;
++		}
++#endif // #ifdef CONFIG_KSU_SUSFS
+ 	rc = security_context_to_sid_force(&selinux_state, value, size,
+ 					   &newsid);
++#ifdef CONFIG_KSU_SUSFS
++bypass_orig_flow:
++#endif // #ifdef CONFIG_KSU_SUSFS
+ 	if (rc) {
+ 		pr_err("SELinux:  unable to map context to SID"
+ 		       "for (%s, %lu), rc=%d\n",
+@@ -6590,6 +6629,161 @@ static int selinux_setprocattr(const char *name, void *value, size_t size)
  	return error;
  }
  
@@ -2674,7 +2735,7 @@ index ad079e552..544cdc95d 100644
  static int selinux_ismaclabel(const char *name)
  {
  	return (strcmp(name, XATTR_SELINUX_SUFFIX) == 0);
-@@ -7225,8 +7386,11 @@ static struct security_hook_list selinux_hooks[] __lsm_ro_after_init = {
+@@ -7225,8 +7419,11 @@ static struct security_hook_list selinux_hooks[] __lsm_ro_after_init = {
  	LSM_HOOK_INIT(d_instantiate, selinux_d_instantiate),
  
  	LSM_HOOK_INIT(getprocattr, selinux_getprocattr),
@@ -2893,7 +2954,7 @@ index 755325a94..8347aff59 100644
  {
  	struct selinux_fs_info *fsi = file_inode(file)->i_sb->s_fs_info;
 diff --git a/security/selinux/ss/services.c b/security/selinux/ss/services.c
-index 5e7bd32db..5a7910725 100644
+index 5e7bd32db..ff819ab7a 100644
 --- a/security/selinux/ss/services.c
 +++ b/security/selinux/ss/services.c
 @@ -70,6 +70,13 @@
@@ -2951,7 +3012,7 @@ index 5e7bd32db..5a7910725 100644
  	seqno = newpolicy->latest_granting;
  
  	/* Install the new policy */
-@@ -4082,3 +4109,236 @@ int security_read_state_kernel(struct selinux_state *state,
+@@ -4082,3 +4109,252 @@ int security_read_state_kernel(struct selinux_state *state,
  	}
  	return err;
  }
@@ -3133,6 +3194,22 @@ index 5e7bd32db..5a7910725 100644
 +				       sid, gfp);
 +}
 +
++int susfs_security_context_to_sid_default(struct selinux_state *state,
++				    const char *scontext, u32 scontext_len,
++				    u32 *sid, u32 def_sid, gfp_t gfp_flags)
++{
++	return susfs_security_context_to_sid_core(state, scontext, scontext_len,
++					    sid, def_sid, gfp_flags, 1);
++}
++
++int susfs_security_context_to_sid_force(struct selinux_state *state,
++				  const char *scontext, u32 scontext_len,
++				  u32 *sid)
++{
++	return susfs_security_context_to_sid_core(state, scontext, scontext_len,
++					    sid, SECSID_NULL, GFP_KERNEL, 1);
++}
++
 +void susfs_security_compute_av_user(struct selinux_state *state,
 +			      u32 ssid,
 +			      u32 tsid,
@@ -3188,6 +3265,7 @@ index 5e7bd32db..5a7910725 100644
 +	goto out;
 +}
 +#endif // #ifdef CONFIG_KSU_SUSFS
+\ No newline at end of file
 diff --git a/security/selinux/status.c b/security/selinux/status.c
 index 4bc8f8099..eb27150ba 100644
 --- a/security/selinux/status.c
