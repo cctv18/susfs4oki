@@ -1399,16 +1399,16 @@ diff --git a/fs/proc/task_mmu.c b/fs/proc/task_mmu.c
 index c79267d5f..00d1fa464 100644
 --- a/fs/proc/task_mmu.c
 +++ b/fs/proc/task_mmu.c
-@@ -27,6 +27,9 @@
- #include <linux/overflow.h>
- #include <linux/buildid.h>
- #include <trace/hooks/mm.h>
+@@ -22,6 +22,9 @@
+ #include <linux/shmem_fs.h>
+ #include <linux/uaccess.h>
+ #include <linux/pkeys.h>
 +#if defined(CONFIG_KSU_SUSFS_SUS_KSTAT) || defined(CONFIG_KSU_SUSFS_SUS_MAP) || defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)
 +#include <linux/susfs_def.h>
 +#endif // #if defined(CONFIG_KSU_SUSFS_SUS_KSTAT) || defined(CONFIG_KSU_SUSFS_SUS_MAP) || defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)
- 
- #include <asm/elf.h>
- #include <asm/tlb.h>
+ #include <linux/minmax.h>
+ #include <linux/overflow.h>
+ #include <linux/buildid.h>
 @@ -531,6 +534,14 @@ static void show_vma_header_prefix(struct seq_file *m,
  	seq_putc(m, ' ');
  }
@@ -1424,11 +1424,10 @@ index c79267d5f..00d1fa464 100644
  static void
  show_map_vma(struct seq_file *m, struct vm_area_struct *vma)
  {
-@@ -544,10 +555,41 @@ show_map_vma(struct seq_file *m, struct vm_area_struct *vma)
- 
+@@ -466,9 +476,47 @@ show_map_vma(struct seq_file *m, struct vm_area_struct *vma)
  	if (vma->vm_file) {
  		const struct inode *inode = file_user_inode(vma->vm_file);
--
+ 
 +#ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
 +		if (SUSFS_IS_INODE_OPEN_REDIRECT(inode)) {
 +			char *spoofed_redirected_name = NULL;
@@ -1437,12 +1436,18 @@ index c79267d5f..00d1fa464 100644
 +			if (!ret) {
 +				pgoff = ((loff_t)vma->vm_pgoff) << PAGE_SHIFT;
 +				start = vma->vm_start;
++#ifdef VMA_PAD_START
 +				end = VMA_PAD_START(vma);
++#else
++				end = vma->vm_end;
++#endif // #ifdef VMA_PAD_START
++#ifdef __VM_NO_COMPAT
 +				if (flags & __VM_NO_COMPAT) {
 +					srcu_read_unlock(&susfs_srcu_open_redirect, srcu_idx);
 +					return;
 +				}
 +				__fold_filemap_fixup_entry(&((struct proc_maps_private *)m->private)->iter, &end);
++#endif // #ifdef __VM_NO_COMPAT
 +				show_vma_header_prefix(m, start, end, flags, pgoff, dev, ino);
 +				seq_pad(m, ' ');
 +				if (spoofed_redirected_name)
@@ -1467,7 +1472,7 @@ index c79267d5f..00d1fa464 100644
  	}
  
  	start = vma->vm_start;
-@@ -1549,6 +1591,13 @@ static int show_smap(struct seq_file *m, void *v)
+@@ -1304,6 +1353,13 @@ static int show_smap(struct seq_file *m, void *v)
  	struct vm_area_struct *vma = v;
  	struct mem_size_stats mss = {};
  
@@ -1478,31 +1483,40 @@ index c79267d5f..00d1fa464 100644
 +	}
 +#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MAP
 +
- 	if (!vma_data_pages(vma))
+ 	if (!vma_pages(vma))
  		goto show_pad;
  
-@@ -1618,6 +1667,11 @@ static int show_smaps_rollup(struct seq_file *m, void *v)
- 			goto out_unlock;
- 		}
+@@ -1363,7 +1412,15 @@ static int show_smaps_rollup(struct seq_file *m, void *v)
  
+ 	vma_start = vma->vm_start;
+ 	do {
 +#ifdef CONFIG_KSU_SUSFS_SUS_MAP
 +		if (vma->vm_file && SUSFS_IS_INODE_SUS_MAP(file_inode(vma->vm_file)))
 +			goto bypass_orig_flow;
 +#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MAP
 +
- 		if (vma->vm_start < last_vma_end) {
- 			/*
- 			 * After retaking the lock, already reported VMA grew
-@@ -1630,6 +1684,9 @@ static int show_smaps_rollup(struct seq_file *m, void *v)
- 			/* Found next unreported VMA, start from its beginning */
- 			smap_gather_stats(priv, vma, &mss);
- 		}
+ 		smap_gather_stats(vma, &mss, 0);
 +#ifdef CONFIG_KSU_SUSFS_SUS_MAP
 +bypass_orig_flow:
 +#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MAP
  		last_vma_end = vma->vm_end;
  
  		/*
+@@ -1429,8 +1486,14 @@ static int show_smaps_rollup(struct seq_file *m, void *v)
+ 
+ 			/* Case 4 above */
+ 			if (vma->vm_end > last_vma_end) {
++#ifdef CONFIG_KSU_SUSFS_SUS_MAP
++				if (!vma->vm_file || !(SUSFS_IS_INODE_SUS_MAP(file_inode(vma->vm_file)))) {
++#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MAP
+ 				smap_gather_stats(vma, &mss, last_vma_end);
+ 				last_vma_end = vma->vm_end;
++#ifdef CONFIG_KSU_SUSFS_SUS_MAP
++				}
++#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MAP
+ 			}
+ 		}
+ 	} for_each_vma(vmi, vma);
 @@ -2449,6 +2506,9 @@ static ssize_t pagemap_read(struct file *file, char __user *buf,
  	while (count && (start_vaddr < end_vaddr)) {
  		int len;
