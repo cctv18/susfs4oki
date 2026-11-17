@@ -639,18 +639,18 @@ diff --git a/fs/namespace.c b/fs/namespace.c
 index 4d910be7c..572d3c20f 100644
 --- a/fs/namespace.c
 +++ b/fs/namespace.c
-@@ -32,11 +32,21 @@
- #include <linux/fs_context.h>
- #include <linux/shmem_fs.h>
- #include <linux/mnt_idmapping.h>
+@@ -23,11 +23,21 @@
+ #include <linux/file.h>
+ #include <linux/uaccess.h>
+ #include <linux/proc_ns.h>
 +#ifdef CONFIG_KSU_SUSFS
 +#include <linux/susfs_def.h>
 +#endif // #ifdef CONFIG_KSU_SUSFS
- 
- #include "pnode.h"
- #include "internal.h"
- #include <trace/hooks/blk.h>
- 
+ #include <linux/magic.h>
+ #include <linux/memblock.h>
+ #include <linux/proc_fs.h>
+ #include <linux/task_work.h>
+ #include <linux/sched/task.h>
 +#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 +extern bool susfs_is_current_ksu_domain(void);
 +extern struct static_key_true susfs_is_sdcard_android_data_not_decrypted;
@@ -658,9 +658,9 @@ index 4d910be7c..572d3c20f 100644
 +#define CL_COPY_MNT_NS BIT(25) /* used by copy_mnt_ns() */
 +#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 +
- /* Maximum number of mounts in a mount namespace */
- static unsigned int sysctl_mount_max __read_mostly = 100000;
- 
+ #include <uapi/linux/mount.h>
+ #include <linux/fs_context.h>
+ #include <linux/shmem_fs.h>
 @@ -145,6 +155,10 @@ static int mnt_alloc_id(struct mount *mnt)
  
  static void mnt_free_id(struct mount *mnt)
